@@ -448,10 +448,21 @@ def atualizar_tabela_vendas():
     for venda in vendas:
         tree_vendas.insert("", "end", values=venda)
 
+def atualizar_estoque_e_valor(produto_id):
+    conn = create_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT quantidade, preco_venda FROM produtos WHERE id = ?", (produto_id,))
+    resultado = cursor.fetchone()
+    conn.close()
+    return resultado  # Retorna (quantidade, preco_venda)
+
 def adicionar_item_venda():
     if not combo_produtos.get():
         messagebox.showerror("Erro", "Por favor, selecione um produto.")
         return
+
+    produto_id = combo_produtos.get().split(' - ')[0]
+    estoque_atual, valor_sugerido = atualizar_estoque_e_valor(produto_id)
 
     try:
         quantidade = int(entry_quantidade.get())
@@ -461,35 +472,67 @@ def adicionar_item_venda():
         messagebox.showerror("Erro", f"Quantidade inválida: {str(e)}")
         return
 
-    try:
-        valor = float(entry_valor.get())
-        if valor <= 0:
-            raise ValueError("O valor deve ser maior que zero.")
-    except ValueError as e:
-        messagebox.showerror("Erro", f"Valor inválido: {str(e)}")
-        return
-
-    produto = combo_produtos.get().split(' - ')[0]
-
-    conn = create_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT quantidade FROM produtos WHERE id = ?", (produto,))
-    estoque_atual = cursor.fetchone()[0]
-    conn.close()
-
     if estoque_atual < quantidade:
         messagebox.showerror("Erro", "Não há produto suficiente em estoque.")
         return
 
-    item = (produto, combo_produtos.get().split(' - ')[1], quantidade, valor, valor * quantidade)
+    item = (produto_id, combo_produtos.get().split(' - ')[1], quantidade, valor_sugerido, valor_sugerido * quantidade)
     itens_venda.append(item)
     tree_itens_venda.insert("", "end", values=item)
+
+    # Atualizar o valor total da venda
+    atualizar_valor_total()
 
     # Limpar campos após adicionar item
     combo_produtos.set('')
     entry_quantidade.delete(0, 'end')
-    entry_valor.delete(0, 'end')
     label_estoque.config(text="Estoque: ")
+
+def atualizar_valor_total():
+    valor_total = sum(item[4] for item in itens_venda)  # Soma dos totais dos itens
+    entry_valor_total.delete(0, 'end')
+    entry_valor_total.insert(0, f"{valor_total:.2f}")
+
+def excluir_venda_selecionada(event=None):
+    selected_item = tree_vendas.selection()
+    if not selected_item:
+        messagebox.showwarning("Aviso", "Por favor, selecione uma venda para excluir.")
+        return
+
+    resposta = messagebox.askyesno("Confirmar exclusão", "Tem certeza que deseja excluir esta venda?")
+    if resposta:
+        venda_id = tree_vendas.item(selected_item)['values'][0]
+
+        conn = create_connection()
+        cursor = conn.cursor()
+        try:
+            # Obter os itens da venda para restaurar o estoque
+            cursor.execute("SELECT produto_id, quantidade FROM itens_venda WHERE venda_id = ?", (venda_id,))
+            itens = cursor.fetchall()
+            for produto_id, quantidade in itens:
+                cursor.execute("UPDATE produtos SET quantidade = quantidade + ? WHERE id = ?", (quantidade, produto_id))
+            cursor.execute("DELETE FROM vendas WHERE id = ?", (venda_id,))
+            cursor.execute("DELETE FROM itens_venda WHERE venda_id = ?", (venda_id,))
+            conn.commit()
+            tree_vendas.delete(selected_item)
+            messagebox.showinfo("Sucesso", "Venda excluída com sucesso.")
+        except sqlite3.Error as e:
+            conn.rollback()
+            messagebox.showerror("Erro", f"Ocorreu um erro ao excluir a venda: {str(e)}")
+        finally:
+            conn.close()
+
+def abrir_cadastro_vendas():
+    global tree_itens_venda, entry_valor_total  # Adicione esta linha para garantir que a variável seja global
+    # ... código existente para abrir o cadastro de vendas ...
+
+    # Adicionar campo para valor total da venda
+    Label(frame_campos, text="Valor Total:", anchor="e", font=("Arial", 12)).grid(row=3, column=0, sticky="e", padx=5, pady=5)
+    entry_valor_total = Entry(frame_campos, width=15, font=("Arial", 12))
+    entry_valor_total.grid(row=3, column=1, sticky="w", padx=5, pady=5)
+
+    # Adicionar a tecla Delete para excluir produtos da venda
+    tree_itens_venda.bind("<Delete>", excluir_produto_venda)
 
 def cadastrar_venda():
     if not combo_clientes.get():
