@@ -576,32 +576,75 @@ def abrir_cadastro_vendas():
     canvas.delete("all")
     canvas.create_image(0, 0, image=FotoBG, anchor="nw")
     
-    canvas.create_text(400, 30, text="Cadastro de Vendas", font=("Arial", 18, "bold"))
+    canvas.create_text(700, 30, text="Cadastro de Vendas", font=("Arial", 24))
 
     # Frame para os campos de entrada
     frame_campos = Frame(window)
-    canvas.create_window(400, 200, window=frame_campos, width=700, height=300)
+    canvas.create_window(700, 175, window=frame_campos, width=600, height=200)
 
     # Campos de entrada
-    Label(frame_campos, text="Cliente:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
+    Label(frame_campos, text="Cliente:", anchor="e", font=("Arial", 12)).grid(row=0, column=0, sticky="e", padx=5, pady=5)
     cliente_combobox_widget, cliente_var = cliente_combobox(frame_campos)
     cliente_combobox_widget.grid(row=0, column=1, padx=5, pady=5)
 
-    Label(frame_campos, text="Produto:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+    Label(frame_campos, text="Produto:", anchor="e", font=("Arial", 12)).grid(row=1, column=0, sticky="e", padx=5, pady=5)
     produto_combobox_widget, produto_var = produto_combobox(frame_campos)
     produto_combobox_widget.grid(row=1, column=1, padx=5, pady=5)
 
-    Label(frame_campos, text="Quantidade:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
-    entry_quantidade = Entry(frame_campos, width=10)
+    Label(frame_campos, text="Quantidade:", anchor="e", font=("Arial", 12)).grid(row=2, column=0, sticky="e", padx=5, pady=5)
+    entry_quantidade = Entry(frame_campos, width=10, font=("Arial", 12))
     entry_quantidade.grid(row=2, column=1, sticky="w", padx=5, pady=5)
 
-    Label(frame_campos, text="Valor Sugerido:").grid(row=3, column=0, sticky="e", padx=5, pady=5)
-    entry_valor = Entry(frame_campos, width=15)
+    Label(frame_campos, text="Valor Sugerido:", anchor="e", font=("Arial", 12)).grid(row=3, column=0, sticky="e", padx=5, pady=5)
+    entry_valor = Entry(frame_campos, width=15, font=("Arial", 12))
     entry_valor.grid(row=3, column=1, sticky="w", padx=5, pady=5)
 
     # Botão para cadastrar a venda
-    btn_cadastrar = Button(frame_campos, text="Cadastrar Venda", command=lambda: cadastrar_venda(cliente_var, produto_var, entry_quantidade, entry_valor))
+    btn_cadastrar = Button(frame_campos, text="Cadastrar Venda", command=lambda: cadastrar_venda(cliente_var, produto_var, entry_quantidade, entry_valor), font=("Arial", 12))
     btn_cadastrar.grid(row=4, column=0, columnspan=2, pady=10)
+
+    # Tabela de produtos
+    tree_produtos = ttk.Treeview(window, columns=("ID", "Tipo", "Cor", "Tamanho", "Preço Custo", "Preço Venda", "Quantidade"), show="headings")
+    tree_produtos.heading("ID", text="ID")
+    tree_produtos.heading("Tipo", text="Tipo")
+    tree_produtos.heading("Cor", text="Cor")
+    tree_produtos.heading("Tamanho", text="Tamanho")
+    tree_produtos.heading("Preço Custo", text="Preço Custo")
+    tree_produtos.heading("Preço Venda", text="Preço Venda")
+    tree_produtos.heading("Quantidade", text="Quantidade")
+    canvas.create_window(700, 375, window=tree_produtos, width=600, height=150)
+
+    # Preencher a tabela com os produtos cadastrados
+    conn = create_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, tipo, cor, tamanho, preco_custo, preco_venda, quantidade FROM produtos")
+    for produto in cursor.fetchall():
+        tree_produtos.insert("", "end", values=produto)
+    conn.close()
+
+    # Tabela de vendas
+    tree_vendas = ttk.Treeview(window, columns=("ID", "Cliente", "Produto", "Quantidade", "Valor Total", "Data"), show="headings")
+    tree_vendas.heading("ID", text="ID")
+    tree_vendas.heading("Cliente", text="Cliente")
+    tree_vendas.heading("Produto", text="Produto")
+    tree_vendas.heading("Quantidade", text="Quantidade")
+    tree_vendas.heading("Valor Total", text="Valor Total")
+    tree_vendas.heading("Data", text="Data")
+    canvas.create_window(700, 550, window=tree_vendas, width=600, height=150)
+
+    # Preencher a tabela com as vendas realizadas
+    conn = create_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT v.id, c.nome, p.tipo, iv.quantidade, v.valor_total, v.data_venda
+        FROM vendas v
+        JOIN clientes c ON v.cliente_id = c.codigo_cliente
+        JOIN itens_venda iv ON iv.venda_id = v.id
+        JOIN produtos p ON iv.produto_id = p.id
+    """)
+    for venda in cursor.fetchall():
+        tree_vendas.insert("", "end", values=venda)
+    conn.close()
 
 def cadastrar_venda(cliente_var, produto_var, entry_quantidade, entry_valor):
     cliente = cliente_var.get()
