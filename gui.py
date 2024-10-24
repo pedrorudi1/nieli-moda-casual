@@ -871,12 +871,12 @@ window = Tk()
 window.geometry("1200x740")
 window.configure(bg = "#F8EBFF")
 
-FotoBG = PhotoImage(file=r"C:\Users\pedro\Códigos\Repositório Pedro\Loja Ju\Background.png")
-FotoClientes = PhotoImage(file=r"C:\Users\pedro\Códigos\Repositório Pedro\Loja Ju\Clientes.png")
-FotoProdutos = PhotoImage(file=r"C:\Users\pedro\Códigos\Repositório Pedro\Loja Ju\Produtos.png")
-FotoVendas = PhotoImage(file=r"C:\Users\pedro\Códigos\Repositório Pedro\Loja Ju\Vendas.png")
-FotoRelatorios = PhotoImage(file=r"C:\Users\pedro\Códigos\Repositório Pedro\Loja Ju\Relatorios.png")
-FotoContasAReceber = PhotoImage(file=r"C:\Users\pedro\Códigos\Repositório Pedro\Loja Ju\ContasAReceber.png")
+FotoBG = PhotoImage(file=r"assets/Background.png")
+FotoClientes = PhotoImage(file=r"assets/Clientes.png")
+FotoProdutos = PhotoImage(file=r"assets/Produtos.png")
+FotoVendas = PhotoImage(file=r"assets/Vendas.png")
+FotoRelatorios = PhotoImage(file=r"assets/Relatorios.png")
+FotoContasAReceber = PhotoImage(file=r"assets/ContasAReceber.png")
 
 
 canvas = Canvas(window, width=1200, height=740)
