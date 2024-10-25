@@ -217,7 +217,7 @@ def cadastrar_produto():
     cor = entry_cor.get()
     tamanho = entry_tamanho.get()
     preco_custo = float(entry_preco_custo.get())
-    preco_venda = preco_custo * 3  # Calculando o preço de venda como três vezes o preço de custo
+    preco_venda = preco_custo * 2  # Calculando o preço de venda como três vezes o preço de custo
     quantidade = int(entry_quantidade.get())
 
     conn = create_connection()
