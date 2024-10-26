@@ -1,8 +1,6 @@
 import sqlite3
-from datetime import datetime, date
-from tkinter import *
-from tkinter import Tk, Canvas, Entry, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame
-from datetime import timedelta
+from datetime import datetime, date, timedelta
+from tkinter import Tk, Canvas, Entry, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame, StringVar, END
 
 # Definir adaptadores personalizados para datetime e date
 def adapt_datetime(dt):
