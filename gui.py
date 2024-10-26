@@ -47,7 +47,7 @@ def criar_banco_dados():
                        nome TEXT NOT NULL,
                        telefone TEXT,
                        endereco TEXT,
-                       cpf TEXT UNIQUE)''')
+                       cpf TEXT)''')
     
     # Tabela de produtos
     cursor.execute('''CREATE TABLE IF NOT EXISTS produtos
@@ -104,7 +104,7 @@ def cadastrar_cliente():
 
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO clientes (codigo_cliente, nome, telefone, endereco, cpf) VALUES (?, ?, ?, ?, ?)",
+    cursor.execute("INSERT OR IGNORE INTO clientes (codigo_cliente, nome, telefone, endereco, cpf) VALUES (?, ?, ?, ?, ?)",
                    (codigo_cliente, nome, telefone, endereco, cpf))
     conn.commit()
     conn.close()
