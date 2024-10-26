@@ -1,8 +1,7 @@
 import sqlite3
 from datetime import datetime, date
-from pathlib import Path
 from tkinter import *
-from tkinter import Tk, Canvas, Entry, Text, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame
+from tkinter import Tk, Canvas, Entry, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame
 from datetime import timedelta
 
 # Definir adaptadores personalizados para datetime e date
@@ -45,9 +44,7 @@ def criar_banco_dados():
                       (id INTEGER PRIMARY KEY AUTOINCREMENT,
                        codigo_cliente TEXT UNIQUE,
                        nome TEXT NOT NULL,
-                       telefone TEXT,
-                       endereco TEXT,
-                       cpf TEXT)''')
+                       telefone TEXT)''')
     
     # Tabela de produtos
     cursor.execute('''CREATE TABLE IF NOT EXISTS produtos
@@ -99,25 +96,22 @@ def cadastrar_cliente():
     codigo_cliente = gerar_codigo_cliente()  # Você precisa implementar esta função
     nome = entry_nome.get()
     telefone = entry_telefone.get()
-    endereco = entry_endereco.get()
-    cpf = entry_cpf.get()
+
 
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO clientes (codigo_cliente, nome, telefone, endereco, cpf) VALUES (?, ?, ?, ?, ?)",
-                   (codigo_cliente, nome, telefone, endereco, cpf))
+    cursor.execute("INSERT OR IGNORE INTO clientes (codigo_cliente, nome, telefone) VALUES (?, ?, ?)",
+                   (codigo_cliente, nome, telefone))
     conn.commit()
     conn.close()
 
     # Limpar campos após cadastro
     entry_nome.delete(0, END)
     entry_telefone.delete(0, END)
-    entry_endereco.delete(0, END)
-    entry_cpf.delete(0, END)
 
     # Inserir novo cliente na tabela
     if 'tree_clientes' in globals() and tree_clientes:
-        tree_clientes.insert("", "end", values=(codigo_cliente, nome, telefone, endereco, cpf))
+        tree_clientes.insert("", "end", values=(codigo_cliente, nome, telefone))
     else:
         print("Erro: A tabela de clientes não foi encontrada.")
 
@@ -159,7 +153,7 @@ def excluir_cliente(event=None):
             conn.close()
 
 def abrir_cadastro_clientes():
-    global entry_nome, entry_telefone, entry_endereco, entry_cpf, tree_clientes
+    global entry_nome, entry_telefone, tree_clientes
 
     # Limpar canvas existente
     canvas.delete("all")
@@ -176,14 +170,6 @@ def abrir_cadastro_clientes():
     entry_telefone = Entry(window, width=40, font=("Arial", 12))
     canvas.create_window(560, 160, window=entry_telefone, anchor="w")
 
-    canvas.create_text(550, 200, text="Endereço:", anchor="e", font=("Arial", 12))
-    entry_endereco = Entry(window, width=40, font=("Arial", 12))
-    canvas.create_window(560, 200, window=entry_endereco, anchor="w")
-
-    canvas.create_text(550, 240, text="CPF:", anchor="e", font=("Arial", 12))
-    entry_cpf = Entry(window, width=40, font=("Arial", 12))
-    canvas.create_window(560, 240, window=entry_cpf, anchor="w")
-
     btn_cadastrar = Button(window, text="Cadastrar", command=cadastrar_cliente, font=("Arial", 12))
     canvas.create_window(650, 290, window=btn_cadastrar)
 
@@ -191,12 +177,10 @@ def abrir_cadastro_clientes():
     canvas.create_window(750, 290, window=btn_excluir)
 
     # Adicionar tabela de clientes
-    tree_clientes = ttk.Treeview(window, columns=("Código", "Nome", "Telefone", "Endereço", "CPF"), show="headings")
+    tree_clientes = ttk.Treeview(window, columns=("Código", "Nome", "Telefone"), show="headings")
     tree_clientes.heading("Código", text="Código")
     tree_clientes.heading("Nome", text="Nome")
     tree_clientes.heading("Telefone", text="Telefone")
-    tree_clientes.heading("Endereço", text="Endereço")
-    tree_clientes.heading("CPF", text="CPF")
     canvas.create_window(700, 500, window=tree_clientes, width=800, height=300)
 
     # Adicionar evento de tecla para excluir cliente
@@ -205,7 +189,7 @@ def abrir_cadastro_clientes():
     # Preencher a tabela com os clientes cadastrados
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT codigo_cliente, nome, telefone, endereco, cpf FROM clientes")
+    cursor.execute("SELECT codigo_cliente, nome, telefone FROM clientes")
     for cliente in cursor.fetchall():
         tree_clientes.insert("", "end", values=cliente)
     conn.close()
@@ -480,18 +464,10 @@ def adicionar_item_venda():
     itens_venda.append(item)
     tree_itens_venda.insert("", "end", values=item)
 
-    # Atualizar o valor total da venda
-    atualizar_valor_total()
-
     # Limpar campos após adicionar item
     combo_produtos.set('')
     entry_quantidade.delete(0, 'end')
     label_estoque.config(text="Estoque: ")
-
-def atualizar_valor_total():
-    valor_total = sum(item[4] for item in itens_venda)  # Soma dos totais dos itens
-    entry_valor_total.delete(0, 'end')
-    entry_valor_total.insert(0, f"{valor_total:.2f}")
 
 def excluir_venda_selecionada(event=None):
     selected_item = tree_vendas.selection()
@@ -522,79 +498,10 @@ def excluir_venda_selecionada(event=None):
         finally:
             conn.close()
 
-def abrir_cadastro_vendas():
-    global tree_itens_venda, entry_valor_total  # Adicione esta linha para garantir que a variável seja global
-    # ... código existente para abrir o cadastro de vendas ...
-
-    # Adicionar campo para valor total da venda
-    Label(frame_campos, text="Valor Total:", anchor="e", font=("Arial", 12)).grid(row=3, column=0, sticky="e", padx=5, pady=5)
-    entry_valor_total = Entry(frame_campos, width=15, font=("Arial", 12))
-    entry_valor_total.grid(row=3, column=1, sticky="w", padx=5, pady=5)
-
-    # Adicionar a tecla Delete para excluir produtos da venda
-    tree_itens_venda.bind("<Delete>", excluir_produto_venda)
-
-def cadastrar_venda():
-    if not combo_clientes.get():
-        messagebox.showerror("Erro", "Por favor, selecione um cliente.")
-        return
-
-    if not combo_produtos.get():
-        messagebox.showerror("Erro", "Por favor, selecione um produto.")
-        return
-
-    try:
-        quantidade = int(entry_quantidade.get())
-        if quantidade <= 0:
-            raise ValueError("A quantidade deve ser maior que zero.")
-    except ValueError as e:
-        messagebox.showerror("Erro", f"Quantidade inválida: {str(e)}")
-        return
-
-    try:
-        valor = float(entry_valor.get())
-        if valor <= 0:
-            raise ValueError("O valor deve ser maior que zero.")
-    except ValueError as e:
-        messagebox.showerror("Erro", f"Valor inválido: {str(e)}")
-        return
-
-    produto = combo_produtos.get().split(' - ')[0]
-
-    conn = create_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT quantidade FROM produtos WHERE id = ?", (produto,))
-    estoque_atual = cursor.fetchone()[0]
-    conn.close()
-
-    if estoque_atual < quantidade:
-        messagebox.showerror("Erro", "Não há produto suficiente em estoque.")
-        return
-
-    # Registrar a venda no banco de dados
-    conn = create_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO vendas (cliente_id, valor_total) VALUES (?, ?)",
-                   (combo_clientes.get().split(' - ')[0], valor * quantidade))
-    venda_id = cursor.lastrowid
-
-    cursor.execute("INSERT INTO itens_venda (venda_id, produto_id, quantidade, valor_unitario) VALUES (?, ?, ?, ?)",
-                   (venda_id, produto, quantidade, valor))
-    cursor.execute("UPDATE produtos SET quantidade = quantidade - ? WHERE id = ?",
-                   (quantidade, produto))
-
-    conn.commit()
-    conn.close()
-
-    messagebox.showinfo("Sucesso", "Venda cadastrada com sucesso!")
-    limpar_venda()
-
 def limpar_venda():
     global itens_venda
     itens_venda = []
 
-def excluir_venda_selecionada(event=None):
-    excluir_venda()
 
 def limpar_tela():
     for widget in canvas.winfo_children():
@@ -842,7 +749,7 @@ def abrir_contas_receber():
     Label(frame_pagamento, text="Registrar Pagamento:", font=("Arial", 12, "bold")).pack(side="left", padx=(0, 10))
     entry_valor = Entry(frame_pagamento, width=15)
     entry_valor.pack(side="left", padx=(0, 10))
-    btn_pagar = Button(frame_pagamento, text="Pagar", command=lambda: registrar_pagamento(tree, entry_valor))
+    btn_pagar = Button(frame_pagamento, text="Pagar")
     btn_pagar.pack(side="left")
 
 def preencher_clientes(combobox):
