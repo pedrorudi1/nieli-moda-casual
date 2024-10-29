@@ -558,54 +558,88 @@ def atualizar_label_total():
 def adicionar_item_venda():
     """Adiciona um item à venda atual"""
     if not combo_produtos.get():
-        messagebox.showerror("Erro", "Por favor, selecione um produto.")
+        messagebox.showwarning("Aviso", "Por favor, selecione um produto.")
         return
-
+    
     try:
-        produto_id = combo_produtos.get().split(' - ')[0]
         quantidade = int(entry_quantidade.get())
-        valor_unitario = float(entry_valor.get())
-        
         if quantidade <= 0:
-            raise ValueError("A quantidade deve ser maior que zero.")
-        if valor_unitario <= 0:
-            raise ValueError("O valor unitário deve ser maior que zero.")
-            
+            raise ValueError("A quantidade deve ser maior que zero")
     except ValueError as e:
-        messagebox.showerror("Erro", f"Valores inválidos: {str(e)}")
+        messagebox.showerror("Erro", f"Quantidade inválida: {str(e)}")
         return
 
-    # Verificar estoque
+    # Obter ID do produto (primeira parte antes do hífen)
+    produto_id = combo_produtos.get().split(' - ')[0]
+    
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT quantidade FROM produtos WHERE id = ?", (produto_id,))
-    estoque_atual = cursor.fetchone()[0]
-    conn.close()
-
-    if estoque_atual < quantidade:
-        messagebox.showerror("Erro", f"Estoque insuficiente. Disponível: {estoque_atual}")
-        return
-
-    # Calcular subtotal
-    subtotal = quantidade * valor_unitario
-
-    # Adicionar à tabela de itens
-    tree_itens_venda.insert("", "end", values=(
-        produto_id,
-        combo_produtos.get().split(' - ')[1],
-        quantidade,
-        f"{valor_unitario:.2f}",
-        f"{subtotal:.2f}"
-    ))
-
-    # Atualizar total
-    atualizar_label_total()
-
-    # Limpar campos
-    combo_produtos.set('')
-    entry_quantidade.delete(0, 'end')
-    entry_valor.delete(0, 'end')
-    label_estoque.config(text="Estoque: ")
+    
+    try:
+        # Verificar estoque e preços (normal e promocional)
+        cursor.execute("""
+            SELECT tipo, cor, tamanho, quantidade, preco_venda, promocao, preco_promocional 
+            FROM produtos 
+            WHERE id = ?
+        """, (produto_id,))
+        
+        produto = cursor.fetchone()
+        if not produto:
+            messagebox.showerror("Erro", "Produto não encontrado.")
+            return
+            
+        tipo, cor, tamanho, estoque, preco_normal, em_promocao, preco_promocional = produto
+        
+        if estoque < quantidade:
+            messagebox.showerror("Erro", f"Estoque insuficiente. Disponível: {estoque}")
+            return
+        
+        # Determinar qual preço usar
+        preco_venda = preco_promocional if em_promocao and preco_promocional is not None else preco_normal
+        
+        # Calcular subtotal
+        subtotal = quantidade * preco_venda
+        
+        # Verificar se o produto já está na lista
+        for item in tree_itens_venda.get_children():
+            valores = tree_itens_venda.item(item)['values']
+            if valores[0] == produto_id:  # Se encontrar o mesmo produto
+                nova_qtd = valores[2] + quantidade
+                if nova_qtd > estoque:
+                    messagebox.showerror("Erro", f"Estoque insuficiente. Disponível: {estoque}")
+                    return
+                    
+                novo_subtotal = nova_qtd * preco_venda
+                tree_itens_venda.item(item, values=(
+                    produto_id,
+                    f"{tipo} - {cor} - {tamanho}",
+                    nova_qtd,
+                    f"{preco_venda:.2f}",
+                    f"{novo_subtotal:.2f}"
+                ))
+                break
+        else:  # Se não encontrar o produto na lista
+            # Adicionar novo item
+            tree_itens_venda.insert("", "end", values=(
+                produto_id,
+                f"{tipo} - {cor} - {tamanho}",
+                quantidade,
+                f"{preco_venda:.2f}",
+                f"{subtotal:.2f}"
+            ))
+        
+        # Limpar campos
+        entry_quantidade.delete(0, END)
+        entry_quantidade.insert(0, "1")
+        combo_produtos.set("")  # Limpar seleção de produto
+        
+        # Atualizar total
+        atualizar_label_total()
+        
+    except sqlite3.Error as e:
+        messagebox.showerror("Erro", f"Erro ao adicionar item: {str(e)}")
+    finally:
+        conn.close()
 
 def finalizar_venda():
     """Finaliza a venda atual"""
@@ -1315,7 +1349,6 @@ def editar_item_venda(event=None):
     valores = tree_itens_venda.item(selected_item)['values']
     produto_id = valores[0]
     quantidade_atual = valores[2]
-    valor_atual = float(valores[3])
 
     # Criar janela de edição
     janela_edicao = Toplevel()
@@ -1328,39 +1361,37 @@ def editar_item_venda(event=None):
     entry_quantidade.insert(0, quantidade_atual)
     entry_quantidade.pack(pady=5)
 
-    Label(janela_edicao, text="Valor Unitário:").pack(pady=5)
-    entry_valor = Entry(janela_edicao)
-    entry_valor.insert(0, valor_atual)
-    entry_valor.pack(pady=5)
-
     def salvar_edicao():
         try:
             nova_quantidade = int(entry_quantidade.get())
-            novo_valor = float(entry_valor.get())
-
             if nova_quantidade <= 0:
                 raise ValueError("A quantidade deve ser maior que zero")
-            if novo_valor <= 0:
-                raise ValueError("O valor deve ser maior que zero")
 
-            # Verificar estoque
+            # Verificar estoque e preço atual
             conn = create_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT quantidade FROM produtos WHERE id = ?", (produto_id,))
-            estoque_atual = cursor.fetchone()[0]
+            cursor.execute("""
+                SELECT quantidade, preco_venda, promocao, preco_promocional 
+                FROM produtos 
+                WHERE id = ?
+            """, (produto_id,))
+            estoque_atual, preco_normal, em_promocao, preco_promocional = cursor.fetchone()
             conn.close()
 
             if estoque_atual < nova_quantidade:
                 messagebox.showerror("Erro", f"Estoque insuficiente. Disponível: {estoque_atual}")
                 return
 
+            # Determinar qual preço usar
+            preco_venda = preco_promocional if em_promocao and preco_promocional is not None else preco_normal
+
             # Atualizar item na tabela
-            subtotal = nova_quantidade * novo_valor
+            subtotal = nova_quantidade * preco_venda
             tree_itens_venda.item(selected_item, values=(
                 produto_id,
                 valores[1],  # Nome do produto permanece o mesmo
                 nova_quantidade,
-                f"{novo_valor:.2f}",
+                f"{preco_venda:.2f}",
                 f"{subtotal:.2f}"
             ))
 
@@ -1605,6 +1636,250 @@ def filtrar_contas(tree, cliente_filtro):
         messagebox.showerror("Erro", f"Erro ao filtrar contas: {str(e)}")
     finally:
         conn.close()
+
+def adicionar_coluna_promocao():
+    """Adiciona a coluna promocao na tabela produtos se ela não existir"""
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Verificar se a coluna existe
+        cursor.execute("PRAGMA table_info(produtos)")
+        colunas = [info[1] for info in cursor.fetchall()]
+        
+        if 'promocao' not in colunas:
+            cursor.execute("""
+                ALTER TABLE produtos
+                ADD COLUMN promocao INTEGER DEFAULT 0
+            """)
+            conn.commit()
+            print("Coluna promocao adicionada com sucesso!")
+    except sqlite3.Error as e:
+        print(f"Erro ao adicionar coluna: {e}")
+    finally:
+        conn.close()
+
+def abrir_promocoes():
+    """Abre a tela de promoções"""
+    global tree_promocoes
+    
+    # Limpar canvas e configurar background
+    canvas.delete("all")
+    canvas.create_image(0, 0, image=FotoBG, anchor="nw")
+    canvas.create_text(700, 30, text="Promoções", font=("Arial", 24))
+
+    # Frame principal
+    frame_promocoes = Frame(window)
+    canvas.create_window(700, 350, window=frame_promocoes, width=800)
+
+    # Criar notebook para abas
+    notebook = ttk.Notebook(frame_promocoes)
+    notebook.pack(fill=BOTH, expand=True)
+
+    # Aba de Produtos em Promoção
+    tab_produtos = Frame(notebook)
+    notebook.add(tab_produtos, text="Produtos em Promoção")
+
+    # Aba de Gerenciar Promoções
+    tab_gerenciar = Frame(notebook)
+    notebook.add(tab_gerenciar, text="Gerenciar Promoções")
+
+    # Tabela de produtos em promoção (primeira aba)
+    tree_promocoes = ttk.Treeview(tab_produtos, 
+                                 columns=("ID", "Tipo", "Cor", "Tamanho", "Preço Normal", "Preço Promocional"),
+                                 show="headings", 
+                                 height=15)
+
+    tree_promocoes.heading("ID", text="ID")
+    tree_promocoes.heading("Tipo", text="Tipo")
+    tree_promocoes.heading("Cor", text="Cor")
+    tree_promocoes.heading("Tamanho", text="Tamanho")
+    tree_promocoes.heading("Preço Normal", text="Preço Normal")
+    tree_promocoes.heading("Preço Promocional", text="Preço Promocional")
+
+    tree_promocoes.column("ID", width=50, anchor="center")
+    tree_promocoes.column("Tipo", width=150)
+    tree_promocoes.column("Cor", width=100)
+    tree_promocoes.column("Tamanho", width=100)
+    tree_promocoes.column("Preço Normal", width=100, anchor="e")
+    tree_promocoes.column("Preço Promocional", width=100, anchor="e")
+
+    tree_promocoes.pack(pady=10, padx=10, fill=BOTH, expand=True)
+
+    # Frame para gerenciamento de promoções (segunda aba)
+    frame_gerenciar = Frame(tab_gerenciar)
+    frame_gerenciar.pack(pady=10, fill=BOTH, expand=True)
+
+    # Combobox para selecionar produto
+    Label(frame_gerenciar, text="Selecionar Produto:", font=("Arial", 12)).pack(pady=5)
+    combo_produtos = ttk.Combobox(frame_gerenciar, width=40)
+    combo_produtos['values'] = consultar_produtos()
+    combo_produtos.pack(pady=5)
+
+    # Campo para preço promocional
+    Label(frame_gerenciar, text="Preço Promocional:", font=("Arial", 12)).pack(pady=5)
+    entry_preco_promo = Entry(frame_gerenciar, width=15)
+    entry_preco_promo.pack(pady=5)
+
+    # Botões
+    frame_botoes = Frame(frame_gerenciar)
+    frame_botoes.pack(pady=10)
+
+    btn_adicionar = Button(frame_botoes, 
+                          text="Adicionar à Promoção",
+                          command=lambda: adicionar_promocao(combo_produtos.get(), entry_preco_promo.get()),
+                          font=("Arial", 12), 
+                          bg="#4CAF50", 
+                          fg="white")
+    btn_adicionar.pack(side=LEFT, padx=5)
+
+    btn_remover = Button(frame_botoes, 
+                        text="Remover da Promoção",
+                        command=lambda: remover_promocao(combo_produtos.get()),
+                        font=("Arial", 12), 
+                        bg="#f44336", 
+                        fg="white")
+    btn_remover.pack(side=LEFT, padx=5)
+
+    # Carregar produtos em promoção
+    carregar_produtos_promocao()
+
+def adicionar_promocao(produto_info, preco_promo):
+    """Adiciona um produto à lista de promoções"""
+    if not produto_info or not preco_promo:
+        messagebox.showerror("Erro", "Por favor, preencha todos os campos.")
+        return
+
+    try:
+        produto_id = produto_info.split(' - ')[0]
+        preco_promocional = float(preco_promo)
+
+        if preco_promocional <= 0:
+            raise ValueError("O preço promocional deve ser maior que zero")
+
+        conn = create_connection()
+        cursor = conn.cursor()
+
+        # Verificar preço atual
+        cursor.execute("SELECT preco_venda FROM produtos WHERE id = ?", (produto_id,))
+        preco_atual = cursor.fetchone()[0]
+
+        if preco_promocional >= preco_atual:
+            messagebox.showerror("Erro", "O preço promocional deve ser menor que o preço normal.")
+            return
+
+        # Atualizar produto como em promoção
+        cursor.execute("""
+            UPDATE produtos 
+            SET promocao = 1, preco_promocional = ? 
+            WHERE id = ?
+        """, (preco_promocional, produto_id))
+
+        conn.commit()
+        messagebox.showinfo("Sucesso", "Produto adicionado à promoção!")
+        
+        # Atualizar a tabela
+        carregar_produtos_promocao()
+
+    except ValueError as e:
+        messagebox.showerror("Erro", f"Valor inválido: {str(e)}")
+    except sqlite3.Error as e:
+        messagebox.showerror("Erro", f"Erro ao adicionar promoção: {str(e)}")
+    finally:
+        conn.close()
+
+def remover_promocao(produto_info):
+    """Remove um produto da lista de promoções"""
+    if not produto_info:
+        messagebox.showerror("Erro", "Por favor, selecione um produto.")
+        return
+
+    try:
+        produto_id = produto_info.split(' - ')[0]
+        
+        conn = create_connection()
+        cursor = conn.cursor()
+
+        # Remover produto da promoção
+        cursor.execute("""
+            UPDATE produtos 
+            SET promocao = 0, preco_promocional = NULL 
+            WHERE id = ?
+        """, (produto_id,))
+
+        conn.commit()
+        messagebox.showinfo("Sucesso", "Produto removido da promoção!")
+        
+        # Atualizar a tabela
+        carregar_produtos_promocao()
+
+    except sqlite3.Error as e:
+        messagebox.showerror("Erro", f"Erro ao remover promoção: {str(e)}")
+    finally:
+        conn.close()
+
+def carregar_produtos_promocao():
+    """Carrega os produtos em promoção na tabela"""
+    for item in tree_promocoes.get_children():
+        tree_promocoes.delete(item)
+
+    conn = create_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT id, tipo, cor, tamanho, preco_venda, preco_promocional
+            FROM produtos
+            WHERE promocao = 1
+            ORDER BY tipo, cor, tamanho
+        """)
+
+        for row in cursor.fetchall():
+            produto_id, tipo, cor, tamanho, preco_normal, preco_promo = row
+            tree_promocoes.insert("", "end", values=(
+                produto_id,
+                tipo,
+                cor,
+                tamanho,
+                f"R$ {preco_normal:.2f}",
+                f"R$ {preco_promo:.2f}"
+            ))
+
+    except sqlite3.Error as e:
+        print(f"Erro ao carregar produtos em promoção: {e}")
+    finally:
+        conn.close()
+
+def adicionar_colunas_promocao():
+    """Adiciona as colunas necessárias para promoções na tabela produtos"""
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Verificar se as colunas existem
+        cursor.execute("PRAGMA table_info(produtos)")
+        colunas = [info[1] for info in cursor.fetchall()]
+        
+        if 'promocao' not in colunas:
+            cursor.execute("""
+                ALTER TABLE produtos
+                ADD COLUMN promocao INTEGER DEFAULT 0
+            """)
+        
+        if 'preco_promocional' not in colunas:
+            cursor.execute("""
+                ALTER TABLE produtos
+                ADD COLUMN preco_promocional REAL
+            """)
+            
+        conn.commit()
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+
+# Chamar no início do programa
+adicionar_colunas_promocao()
 
 window = Tk()
 window.geometry("1200x740")
