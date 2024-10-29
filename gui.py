@@ -1,6 +1,6 @@
 import sqlite3
 from datetime import datetime, date, timedelta
-from tkinter import Tk, Canvas, Entry, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame, StringVar, END
+from tkinter import Tk, Canvas, Entry, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame, StringVar, END, LEFT, RIGHT
 
 # Definir adaptadores personalizados para datetime e date
 def adapt_datetime(dt):
@@ -27,10 +27,10 @@ def create_connection():
 
 
 # No início do arquivo, adicione esta variável global
-global tree_produtos, tree_clientes
+global tree_produtos, tree_clientes, label_total
 
 # Variáveis globais
-global combo_clientes, combo_produtos, entry_quantidade, entry_valor, label_estoque, tree_vendas, tree_itens_venda
+global combo_clientes, combo_produtos, entry_quantidade, entry_valor, label_estoque, tree_vendas, tree_itens_venda, label_total, tree_vendas
 itens_venda = []
 
 def criar_banco_dados():
@@ -410,6 +410,7 @@ def consultar_vendas():
     return vendas
 
 def atualizar_tabela_vendas():
+    """Atualiza a tabela de histórico de vendas"""
     global tree_vendas
     # Limpar a tabela
     for i in tree_vendas.get_children():
@@ -428,7 +429,10 @@ def atualizar_tabela_vendas():
     conn.close()
 
     for venda in vendas:
-        tree_vendas.insert("", "end", values=venda)
+        # Formatar o valor e a data
+        valor_formatado = f"R$ {venda[2]:.2f}"
+        data_formatada = venda[3].strftime("%d/%m/%Y %H:%M")
+        tree_vendas.insert("", "end", values=(venda[0], venda[1], valor_formatado, data_formatada))
 
 def atualizar_estoque_e_valor(produto_id):
     conn = create_connection()
@@ -438,68 +442,154 @@ def atualizar_estoque_e_valor(produto_id):
     conn.close()
     return resultado  # Retorna (quantidade, preco_venda)
 
+def calcular_total_venda():
+    """Calcula o total da venda atual baseado nos itens da tree_itens_venda"""
+    total = 0.0
+    for item in tree_itens_venda.get_children():
+        valores = tree_itens_venda.item(item)['values']
+        total += float(valores[4])  # Soma o subtotal de cada item
+    return total
+
+def atualizar_label_total():
+    """Atualiza o label com o total da venda"""
+    global label_total
+    total = calcular_total_venda()
+    label_total.config(text=f"R$ {total:.2f}")
+
 def adicionar_item_venda():
+    """Adiciona um item à venda atual"""
+    # Validações básicas
     if not combo_produtos.get():
         messagebox.showerror("Erro", "Por favor, selecione um produto.")
         return
 
-    produto_id = combo_produtos.get().split(' - ')[0]
-    estoque_atual, valor_sugerido = atualizar_estoque_e_valor(produto_id)
-
     try:
+        produto_id = combo_produtos.get().split(' - ')[0]
         quantidade = int(entry_quantidade.get())
+        valor_unitario = float(entry_valor.get())
+        
         if quantidade <= 0:
             raise ValueError("A quantidade deve ser maior que zero.")
+        if valor_unitario <= 0:
+            raise ValueError("O valor unitário deve ser maior que zero.")
+            
     except ValueError as e:
-        messagebox.showerror("Erro", f"Quantidade inválida: {str(e)}")
+        messagebox.showerror("Erro", f"Valores inválidos: {str(e)}")
         return
+
+    # Verificar estoque
+    conn = create_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT quantidade FROM produtos WHERE id = ?", (produto_id,))
+    estoque_atual = cursor.fetchone()[0]
+    conn.close()
 
     if estoque_atual < quantidade:
-        messagebox.showerror("Erro", "Não há produto suficiente em estoque.")
+        messagebox.showerror("Erro", f"Estoque insuficiente. Disponível: {estoque_atual}")
         return
 
-    item = (produto_id, combo_produtos.get().split(' - ')[1], quantidade, valor_sugerido, valor_sugerido * quantidade)
-    itens_venda.append(item)
-    tree_itens_venda.insert("", "end", values=item)
+    # Calcular subtotal
+    subtotal = quantidade * valor_unitario
 
-    # Limpar campos após adicionar item
+    # Adicionar à tabela de itens
+    tree_itens_venda.insert("", "end", values=(
+        produto_id,
+        combo_produtos.get().split(' - ')[1],
+        quantidade,
+        f"{valor_unitario:.2f}",
+        f"{subtotal:.2f}"
+    ))
+
+    # Atualizar total
+    atualizar_label_total()
+
+    # Limpar campos
     combo_produtos.set('')
     entry_quantidade.delete(0, 'end')
+    entry_valor.delete(0, 'end')
     label_estoque.config(text="Estoque: ")
 
-def excluir_venda_selecionada(event=None):
-    selected_item = tree_vendas.selection()
-    if not selected_item:
-        messagebox.showwarning("Aviso", "Por favor, selecione uma venda para excluir.")
+def finalizar_venda():
+    """Finaliza a venda atual"""
+    # Validações
+    if not combo_clientes.get():
+        messagebox.showerror("Erro", "Por favor, selecione um cliente.")
         return
 
-    resposta = messagebox.askyesno("Confirmar exclusão", "Tem certeza que deseja excluir esta venda?")
-    if resposta:
-        venda_id = tree_vendas.item(selected_item)['values'][0]
+    if not tree_itens_venda.get_children():
+        messagebox.showerror("Erro", "Adicione pelo menos um item à venda.")
+        return
 
+    try:
+        cliente_id = combo_clientes.get().split(' - ')[0]
+        valor_total = calcular_total_venda()
+        
         conn = create_connection()
         cursor = conn.cursor()
+        
+        # Iniciar transação
+        conn.execute("BEGIN TRANSACTION")
+        
         try:
-            # Obter os itens da venda para restaurar o estoque
-            cursor.execute("SELECT produto_id, quantidade FROM itens_venda WHERE venda_id = ?", (venda_id,))
-            itens = cursor.fetchall()
-            for produto_id, quantidade in itens:
-                cursor.execute("UPDATE produtos SET quantidade = quantidade + ? WHERE id = ?", (quantidade, produto_id))
-            cursor.execute("DELETE FROM vendas WHERE id = ?", (venda_id,))
-            cursor.execute("DELETE FROM itens_venda WHERE venda_id = ?", (venda_id,))
+            # Inserir venda
+            cursor.execute("""
+                INSERT INTO vendas (cliente_id, valor_total, data_venda)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            """, (cliente_id, valor_total))
+            
+            venda_id = cursor.lastrowid
+
+            # Inserir itens da venda e atualizar estoque
+            for item in tree_itens_venda.get_children():
+                valores = tree_itens_venda.item(item)['values']
+                produto_id = valores[0]
+                quantidade = valores[2]
+                valor_unitario = float(valores[3])
+
+                # Inserir item da venda
+                cursor.execute("""
+                    INSERT INTO itens_venda (venda_id, produto_id, quantidade, valor_unitario)
+                    VALUES (?, ?, ?, ?)
+                """, (venda_id, produto_id, quantidade, valor_unitario))
+
+                # Atualizar estoque
+                cursor.execute("""
+                    UPDATE produtos 
+                    SET quantidade = quantidade - ? 
+                    WHERE id = ?
+                """, (quantidade, produto_id))
+
             conn.commit()
-            tree_vendas.delete(selected_item)
-            messagebox.showinfo("Sucesso", "Venda excluída com sucesso.")
+            messagebox.showinfo("Sucesso", "Venda finalizada com sucesso!")
+            
+            # Limpar a tela de vendas
+            limpar_venda()
+            
         except sqlite3.Error as e:
             conn.rollback()
-            messagebox.showerror("Erro", f"Ocorreu um erro ao excluir a venda: {str(e)}")
+            messagebox.showerror("Erro", f"Erro ao finalizar venda: {str(e)}")
+            return
         finally:
             conn.close()
 
-def limpar_venda():
-    global itens_venda
-    itens_venda = []
+    except Exception as e:
+        messagebox.showerror("Erro", f"Erro inesperado: {str(e)}")
+        return
 
+def limpar_venda():
+    """Limpa todos os campos e a tabela de itens da venda atual"""
+    combo_clientes.set('')
+    combo_produtos.set('')
+    entry_quantidade.delete(0, 'end')
+    entry_valor.delete(0, 'end')
+    label_estoque.config(text="Estoque: ")
+    
+    # Limpar tabela de itens
+    for item in tree_itens_venda.get_children():
+        tree_itens_venda.delete(item)
+    
+    # Atualizar total
+    atualizar_label_total()
 
 def limpar_tela():
     for widget in canvas.winfo_children():
@@ -521,128 +611,101 @@ def produto_combobox(frame):
     return combobox, produto_var
 
 def abrir_cadastro_vendas():
+    global combo_clientes, combo_produtos, entry_quantidade, entry_valor, label_estoque, tree_itens_venda, label_total, tree_vendas
+    # Limpar canvas e configurar background
     canvas.delete("all")
     canvas.create_image(0, 0, image=FotoBG, anchor="nw")
-    
     canvas.create_text(700, 30, text="Cadastro de Vendas", font=("Arial", 24))
 
-    # Frame para os campos de entrada
-    frame_campos = Frame(window)
-    canvas.create_window(700, 175, window=frame_campos, width=600, height=200)
+    # Frame principal para a venda
+    frame_venda = Frame(window)
+    canvas.create_window(700, 80, window=frame_venda, width=800)
 
-    # Campos de entrada
-    Label(frame_campos, text="Cliente:", anchor="e", font=("Arial", 12)).grid(row=0, column=0, sticky="e", padx=5, pady=5)
-    cliente_combobox_widget, cliente_var = cliente_combobox(frame_campos)
-    cliente_combobox_widget.grid(row=0, column=1, padx=5, pady=5)
+    # Seleção do cliente
+    Label(frame_venda, text="Cliente:", font=("Arial", 12)).grid(row=0, column=0, sticky="e", padx=5, pady=5)
+    global combo_clientes
+    combo_clientes = ttk.Combobox(frame_venda, width=40)
+    combo_clientes['values'] = consultar_clientes()
+    combo_clientes.grid(row=0, column=1, columnspan=2, sticky="w", padx=5, pady=5)
 
-    Label(frame_campos, text="Produto:", anchor="e", font=("Arial", 12)).grid(row=1, column=0, sticky="e", padx=5, pady=5)
-    produto_combobox_widget, produto_var = produto_combobox(frame_campos)
-    produto_combobox_widget.grid(row=1, column=1, padx=5, pady=5)
+    # Frame para adicionar itens
+    frame_itens = Frame(window)
+    canvas.create_window(700, 180, window=frame_itens, width=800)
 
-    Label(frame_campos, text="Quantidade:", anchor="e", font=("Arial", 12)).grid(row=2, column=0, sticky="e", padx=5, pady=5)
-    entry_quantidade = Entry(frame_campos, width=10, font=("Arial", 12))
-    entry_quantidade.grid(row=2, column=1, sticky="w", padx=5, pady=5)
+    # Seleção do produto
+    Label(frame_itens, text="Produto:", font=("Arial", 12)).grid(row=0, column=0, sticky="e", padx=5, pady=5)
+    global combo_produtos
+    combo_produtos = ttk.Combobox(frame_itens, width=40)
+    combo_produtos['values'] = consultar_produtos()
+    combo_produtos.grid(row=0, column=1, columnspan=2, sticky="w", padx=5, pady=5)
+    combo_produtos.bind('<<ComboboxSelected>>', atualizar_info_produto)
 
-    Label(frame_campos, text="Valor Sugerido:", anchor="e", font=("Arial", 12)).grid(row=3, column=0, sticky="e", padx=5, pady=5)
-    entry_valor = Entry(frame_campos, width=15, font=("Arial", 12))
-    entry_valor.grid(row=3, column=1, sticky="w", padx=5, pady=5)
+    # Quantidade e valor
+    Label(frame_itens, text="Quantidade:", font=("Arial", 12)).grid(row=1, column=0, sticky="e", padx=5, pady=5)
+    global entry_quantidade, entry_valor, label_estoque
+    entry_quantidade = Entry(frame_itens, width=10)
+    entry_quantidade.grid(row=1, column=1, sticky="w", padx=5, pady=5)
+    
+    label_estoque = Label(frame_itens, text="Estoque: ", font=("Arial", 12))
+    label_estoque.grid(row=1, column=2, sticky="w", padx=5, pady=5)
 
-    # Botão para cadastrar a venda
-    btn_cadastrar = Button(frame_campos, text="Cadastrar Venda", command=lambda: cadastrar_venda(cliente_var, produto_var, entry_quantidade, entry_valor), font=("Arial", 12))
-    btn_cadastrar.grid(row=4, column=0, columnspan=2, pady=10)
+    Label(frame_itens, text="Valor Unitário:", font=("Arial", 12)).grid(row=2, column=0, sticky="e", padx=5, pady=5)
+    entry_valor = Entry(frame_itens, width=15)
+    entry_valor.grid(row=2, column=1, sticky="w", padx=5, pady=5)
 
-    # Tabela de produtos
-    tree_produtos = ttk.Treeview(window, columns=("ID", "Tipo", "Cor", "Tamanho", "Preço Custo", "Preço Venda", "Quantidade"), show="headings")
-    tree_produtos.heading("ID", text="ID")
-    tree_produtos.heading("Tipo", text="Tipo")
-    tree_produtos.heading("Cor", text="Cor")
-    tree_produtos.heading("Tamanho", text="Tamanho")
-    tree_produtos.heading("Preço Custo", text="Preço Custo")
-    tree_produtos.heading("Preço Venda", text="Preço Venda")
-    tree_produtos.heading("Quantidade", text="Quantidade")
-    canvas.create_window(700, 375, window=tree_produtos, width=600, height=150)
+    # Botão de adicionar item (ajustado para ficar mais visível)
+    btn_adicionar = Button(frame_itens, text="Adicionar Item", command=adicionar_item_venda, 
+                          font=("Arial", 12), bg="#4CAF50", fg="white")
+    btn_adicionar.grid(row=3, column=0, columnspan=3, pady=15)  # Aumentado o pady
 
-    # Preencher a tabela com os produtos cadastrados
-    conn = create_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, tipo, cor, tamanho, preco_custo, preco_venda, quantidade FROM produtos")
-    for produto in cursor.fetchall():
-        tree_produtos.insert("", "end", values=produto)
-    conn.close()
+    # Tabela de itens da venda atual
+    global tree_itens_venda
+    tree_itens_venda = ttk.Treeview(window, columns=("ID", "Produto", "Quantidade", "Valor Unit.", "Subtotal"), 
+                                   show="headings", height=5)
+    for col in ("ID", "Produto", "Quantidade", "Valor Unit.", "Subtotal"):
+        tree_itens_venda.heading(col, text=col)
+    canvas.create_window(700, 350, window=tree_itens_venda, width=800)
 
-    # Tabela de vendas
-    tree_vendas = ttk.Treeview(window, columns=("ID", "Cliente", "Produto", "Quantidade", "Valor Total", "Data"), show="headings")
+    # Frame para totalização e finalização
+    frame_total = Frame(window)
+    canvas.create_window(700, 450, window=frame_total, width=800)
+
+    Label(frame_total, text="Total da Venda:", font=("Arial", 14, "bold")).pack(side=LEFT, padx=10)
+    label_total = Label(frame_total, text="R$ 0,00", font=("Arial", 14, "bold"))
+    label_total.pack(side=LEFT, padx=10)
+
+    # Botões de finalização (ajustados para melhor visibilidade)
+    btn_finalizar = Button(frame_total, text="Finalizar Venda", command=finalizar_venda, 
+                          font=("Arial", 12), bg="#2196F3", fg="white")
+    btn_finalizar.pack(side=RIGHT, padx=10)
+    
+    btn_cancelar = Button(frame_total, text="Cancelar", command=limpar_venda, 
+                         font=("Arial", 12), bg="#f44336", fg="white")
+    btn_cancelar.pack(side=RIGHT, padx=10)
+
+    # Histórico de vendas
+    Label(window, text="Histórico de Vendas", font=("Arial", 14, "bold")).place(x=700, y=500, anchor="center")
+    
+    tree_vendas = ttk.Treeview(window, columns=("ID", "Cliente", "Total", "Data"), 
+                              show="headings", height=6)
     tree_vendas.heading("ID", text="ID")
     tree_vendas.heading("Cliente", text="Cliente")
-    tree_vendas.heading("Produto", text="Produto")
-    tree_vendas.heading("Quantidade", text="Quantidade")
-    tree_vendas.heading("Valor Total", text="Valor Total")
+    tree_vendas.heading("Total", text="Total")
     tree_vendas.heading("Data", text="Data")
-    canvas.create_window(700, 550, window=tree_vendas, width=600, height=150)
+    
+    tree_vendas.column("ID", width=50)
+    tree_vendas.column("Cliente", width=200)
+    tree_vendas.column("Total", width=100)
+    tree_vendas.column("Data", width=150)
+    
+    canvas.create_window(700, 600, window=tree_vendas, width=800)
 
-    # Preencher a tabela com as vendas realizadas
-    conn = create_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT v.id, c.nome, p.tipo, iv.quantidade, v.valor_total, v.data_venda
-        FROM vendas v
-        JOIN clientes c ON v.cliente_id = c.codigo_cliente
-        JOIN itens_venda iv ON iv.venda_id = v.id
-        JOIN produtos p ON iv.produto_id = p.id
-    """)
-    for venda in cursor.fetchall():
-        tree_vendas.insert("", "end", values=venda)
-    conn.close()
+    # Adicionar eventos
+    tree_itens_venda.bind("<Delete>", remover_item_venda)
+    tree_itens_venda.bind("<Double-1>", editar_item_venda)
 
-def cadastrar_venda(cliente_var, produto_var, entry_quantidade, entry_valor):
-    cliente = cliente_var.get()
-    produto = produto_var.get()
-    quantidade = entry_quantidade.get()
-    valor_total = entry_valor.get()
-
-    if not cliente or not produto or not quantidade or not valor_total:
-        messagebox.showerror("Erro", "Por favor, preencha todos os campos.")
-        return
-
-    try:
-        quantidade = int(quantidade)
-        valor_total = float(valor_total)
-    except ValueError:
-        messagebox.showerror("Erro", "Por favor, insira valores válidos para quantidade e valor.")
-        return
-
-    # Verificar estoque do produto
-    conn = create_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT quantidade FROM produtos WHERE id = ?", (produto.split(' - ')[0],))
-    estoque = cursor.fetchone()
-
-    if not estoque or estoque[0] < quantidade:
-        messagebox.showerror("Erro", "Não há produto suficiente em estoque.")
-        conn.close()
-        return
-
-    # Registrar a venda
-    cursor.execute("INSERT INTO vendas (cliente_id, valor_total) VALUES (?, ?)",
-                   (cliente.split(' - ')[0], valor_total))
-    venda_id = cursor.lastrowid
-
-    cursor.execute("INSERT INTO itens_venda (venda_id, produto_id, quantidade, valor_unitario) VALUES (?, ?, ?, ?)",
-                   (venda_id, produto.split(' - ')[0], quantidade, valor_total))
-    cursor.execute("UPDATE produtos SET quantidade = quantidade - ? WHERE id = ?",
-                   (quantidade, produto.split(' - ')[0]))
-
-    conn.commit()
-    conn.close()
-
-    messagebox.showinfo("Sucesso", "Venda cadastrada com sucesso!")
-    limpar_campos_venda(cliente_var, produto_var, entry_quantidade, entry_valor)
-
-def limpar_campos_venda(cliente_var, produto_var, quantidade_entry, valor_total_entry):
-    cliente_var.set('')
-    produto_var.set('')
-    quantidade_entry.delete(0, 'end')
-    valor_total_entry.delete(0, 'end')
+    # Carregar vendas existentes
+    atualizar_tabela_vendas()
 
 def abrir_dashboard():
     janela_dashboard = Toplevel(window)
@@ -771,6 +834,36 @@ def preencher_produtos(combobox):
 
     # Adiciona os produtos ao combobox no formato "id - tipo cor tamanho"
     combobox['values'] = [f"{id} - {tipo} {cor} {tamanho}" for id, tipo, cor, tamanho in produtos]
+
+def remover_item_venda(event=None):
+    """Remove o item selecionado da venda atual"""
+    selected_item = tree_itens_venda.selection()
+    if not selected_item:
+        messagebox.showwarning("Aviso", "Selecione um item para remover.")
+        return
+        
+    tree_itens_venda.delete(selected_item)
+    atualizar_label_total()
+
+def editar_item_venda(event=None):
+    """Permite editar o item selecionado"""
+    selected_item = tree_itens_venda.selection()
+    if not selected_item:
+        messagebox.showwarning("Aviso", "Selecione um item para editar.")
+        return
+        
+    valores = tree_itens_venda.item(selected_item)['values']
+    
+    # Preencher campos com valores do item selecionado
+    combo_produtos.set(f"{valores[0]} - {valores[1]}")
+    entry_quantidade.delete(0, 'end')
+    entry_quantidade.insert(0, valores[2])
+    entry_valor.delete(0, 'end')
+    entry_valor.insert(0, valores[3])
+    
+    # Remover item da tabela
+    tree_itens_venda.delete(selected_item)
+    atualizar_label_total()
 
 window = Tk()
 window.geometry("1200x740")
