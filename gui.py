@@ -15,15 +15,28 @@ def convert_datetime(s):
 def convert_date(s):
     return date.fromisoformat(s.decode())
 
+def convert_timestamp(val):
+    datepart, timepart = val.decode().split(" ")
+    year, month, day = map(int, datepart.split("-"))
+    timepart_full = timepart.split(".")
+    hours, minutes, seconds = map(int, timepart_full[0].split(":"))
+    if len(timepart_full) == 2:
+        microseconds = int(timepart_full[1])
+    else:
+        microseconds = 0
+    return datetime(year, month, day, hours, minutes, seconds, microseconds)
+
 # Registrar os adaptadores e conversores
 sqlite3.register_adapter(datetime, adapt_datetime)
 sqlite3.register_adapter(date, adapt_date)
 sqlite3.register_converter("datetime", convert_datetime)
 sqlite3.register_converter("date", convert_date)
+sqlite3.register_converter("timestamp", convert_timestamp)
 
 # Função para criar conexão com o banco de dados
 def create_connection():
-    return sqlite3.connect('loja_ju.db', detect_types=sqlite3.PARSE_DECLTYPES)
+    return sqlite3.connect('loja_ju.db', 
+                         detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
 
 
 # No início do arquivo, adicione esta variável global
@@ -516,7 +529,6 @@ def adicionar_item_venda():
 
 def finalizar_venda():
     """Finaliza a venda atual"""
-    # Validações
     if not combo_clientes.get():
         messagebox.showerror("Erro", "Por favor, selecione um cliente.")
         return
@@ -526,6 +538,7 @@ def finalizar_venda():
         return
 
     try:
+        # Obter o código do cliente (primeira parte antes do hífen)
         cliente_id = combo_clientes.get().split(' - ')[0]
         valor_total = calcular_total_venda()
         
@@ -548,7 +561,7 @@ def finalizar_venda():
             for item in tree_itens_venda.get_children():
                 valores = tree_itens_venda.item(item)['values']
                 produto_id = valores[0]
-                quantidade = valores[2]
+                quantidade = int(valores[2])
                 valor_unitario = float(valores[3])
 
                 # Inserir item da venda
@@ -569,6 +582,8 @@ def finalizar_venda():
             
             # Limpar a tela de vendas
             limpar_venda()
+            # Atualizar a tabela de vendas
+            atualizar_tabela_vendas()
             
         except sqlite3.Error as e:
             conn.rollback()
@@ -704,7 +719,7 @@ def abrir_cadastro_vendas():
     tree_vendas.column("Data", width=150)
     
     canvas.create_window(700, 600, window=tree_vendas, width=800)
-
+    
     # Adicionar eventos
     tree_itens_venda.bind("<Delete>", remover_item_venda)
     tree_itens_venda.bind("<Double-1>", editar_item_venda)
@@ -715,7 +730,7 @@ def abrir_cadastro_vendas():
 def abrir_dashboard():
     janela_dashboard = Toplevel(window)
     janela_dashboard.title("Dashboard")
-    janela_dashboard.geometry("400x350")  # Aumentei um pouco a altura para acomodar a nova informaç��o
+    janela_dashboard.geometry("400x350")  # Aumentei um pouco a altura para acomodar a nova informaço
 
     # Obter dados para o dashboard
     vendas_total, vendas_mes_atual, vendas_mes_anterior, total_clientes = obter_dados_dashboard()
@@ -777,98 +792,346 @@ def obter_total_vendas():
     return total if total is not None else 0
 
 def abrir_contas_receber():
+    # Limpar canvas e configurar background
     canvas.delete("all")
     canvas.create_image(0, 0, image=FotoBG, anchor="nw")
+    canvas.create_text(700, 30, text="Contas a Receber", font=("Arial", 24))
 
-    canvas.create_text(600, 30, text="Contas a Receber", font=("Arial", 18, "bold"))
+    # Frame para filtros
+    frame_filtros = Frame(window)
+    canvas.create_window(700, 80, window=frame_filtros, width=800)
 
-    # Frame para o total de vendas
-    frame_total = Frame(window, borderwidth=2, relief="ridge")
-    canvas.create_window(600, 80, window=frame_total, width=500)
+    # Combobox de clientes
+    Label(frame_filtros, text="Filtrar por Cliente:", font=("Arial", 12)).pack(side=LEFT, padx=5)
+    combo_filtro_clientes = ttk.Combobox(frame_filtros, width=40)
+    combo_filtro_clientes['values'] = ['Todos os Clientes'] + consultar_clientes()
+    combo_filtro_clientes.set('Todos os Clientes')
+    combo_filtro_clientes.pack(side=LEFT, padx=5)
 
-    # Obter o total de vendas
-    total_vendas = obter_total_vendas()
-    Label(frame_total, text=f"Total de Vendas: R$ {total_vendas:,.2f}", font=("Arial", 14, "bold")).pack(pady=5)
+    # Botão de filtrar
+    btn_filtrar = Button(frame_filtros, text="Filtrar", 
+                        command=lambda: filtrar_contas(tree_contas, combo_filtro_clientes.get()),
+                        font=("Arial", 12), bg="#2196F3", fg="white")
+    btn_filtrar.pack(side=LEFT, padx=5)
 
-    # Criar Treeview para exibir os clientes e valores
-    tree = ttk.Treeview(window, columns=("Cliente", "Total de Vendas", "Valor Pago", "Saldo Devedor"), show="headings")
-    tree.heading("Cliente", text="Cliente")
-    tree.heading("Total de Vendas", text="Total de Vendas")
-    tree.heading("Valor Pago", text="Valor Pago")
-    tree.heading("Saldo Devedor", text="Saldo Devedor")
-    tree.column("Cliente", width=150)
-    tree.column("Total de Vendas", width=100)
-    tree.column("Valor Pago", width=100)
-    tree.column("Saldo Devedor", width=100)
-    canvas.create_window(600, 300, window=tree, width=500, height=300)
+    # Tabela de contas a receber
+    tree_contas = ttk.Treeview(window, 
+                              columns=("ID", "Data", "Cliente", "Total", "Pago", "Saldo"),
+                              show="headings", 
+                              height=10)
 
-    # Adicionar scrollbar
-    scrollbar = ttk.Scrollbar(window, orient="vertical", command=tree.yview)
-    canvas.create_window(850, 300, window=scrollbar, height=300)
-    tree.configure(yscrollcommand=scrollbar.set)
+    # Configuração das colunas
+    tree_contas.heading("ID", text="ID")
+    tree_contas.heading("Data", text="Data")
+    tree_contas.heading("Cliente", text="Cliente")
+    tree_contas.heading("Total", text="Total Venda")
+    tree_contas.heading("Pago", text="Valor Pago")
+    tree_contas.heading("Saldo", text="Saldo")
 
+    tree_contas.column("ID", width=50, anchor="center")
+    tree_contas.column("Data", width=100, anchor="center")
+    tree_contas.column("Cliente", width=200)
+    tree_contas.column("Total", width=100, anchor="e")
+    tree_contas.column("Pago", width=100, anchor="e")
+    tree_contas.column("Saldo", width=100, anchor="e")
 
-    # Frame para registrar pagamento
+    canvas.create_window(700, 250, window=tree_contas, width=800)
+
+    # Frame para pagamentos
     frame_pagamento = Frame(window)
-    canvas.create_window(600, 500, window=frame_pagamento, width=600)
+    canvas.create_window(700, 400, window=frame_pagamento, width=800)
 
-    Label(frame_pagamento, text="Registrar Pagamento:", font=("Arial", 12, "bold")).pack(side="left", padx=(0, 10))
-    entry_valor = Entry(frame_pagamento, width=15)
-    entry_valor.pack(side="left", padx=(0, 10))
-    btn_pagar = Button(frame_pagamento, text="Pagar")
-    btn_pagar.pack(side="left")
+    Label(frame_pagamento, text="Registrar Pagamento", 
+          font=("Arial", 14, "bold")).pack(pady=10)
 
-def preencher_clientes(combobox):
-    """Preenche o combobox com os clientes cadastrados no banco de dados."""
+    frame_campos = Frame(frame_pagamento)
+    frame_campos.pack()
+
+    # Campo para valor do pagamento
+    Label(frame_campos, text="Valor do Pagamento: R$", 
+          font=("Arial", 12)).grid(row=0, column=0, padx=5, pady=5)
+    entry_valor = Entry(frame_campos, width=15, font=("Arial", 12))
+    entry_valor.grid(row=0, column=1, padx=5, pady=5)
+
+    # Botão de registrar pagamento
+    btn_registrar = Button(frame_campos, 
+                          text="Registrar Pagamento",
+                          command=lambda: registrar_pagamento(tree_contas, entry_valor),
+                          font=("Arial", 12), 
+                          bg="#4CAF50", 
+                          fg="white")
+    btn_registrar.grid(row=0, column=2, padx=20, pady=5)
+
+    # Frame para resumo
+    frame_resumo = Frame(window)
+    canvas.create_window(700, 500, window=frame_resumo, width=800)
+
+    Label(frame_resumo, text="Resumo Financeiro", 
+          font=("Arial", 14, "bold")).pack(pady=10)
+
+    # Alteração aqui: criar label_total como global
+    global label_total_receber
+    label_total_receber = Label(frame_resumo, 
+                               text=f"Total a Receber: R$ {calcular_total_receber():.2f}",
+                               font=("Arial", 12))
+    label_total_receber.pack(pady=5)
+
+    # Carregar dados iniciais
+    carregar_contas(tree_contas)
+
+def carregar_contas(tree, cliente_filtro=None):
+    """Carrega as contas a receber na tabela"""
+    for item in tree.get_children():
+        tree.delete(item)
+
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT codigo_cliente, nome FROM clientes")
-    clientes = cursor.fetchall()
+
+    query = """
+        SELECT 
+            v.id,
+            v.data_venda,
+            c.nome,
+            v.valor_total,
+            COALESCE((
+                SELECT SUM(valor_pago) 
+                FROM pagamentos 
+                WHERE venda_id = v.id
+            ), 0) as valor_pago,
+            v.valor_total - COALESCE((
+                SELECT SUM(valor_pago) 
+                FROM pagamentos 
+                WHERE venda_id = v.id
+            ), 0) as saldo
+        FROM vendas v
+        JOIN clientes c ON v.cliente_id = c.codigo_cliente
+        WHERE v.valor_total > COALESCE((
+            SELECT SUM(valor_pago) 
+            FROM pagamentos 
+            WHERE venda_id = v.id
+        ), 0)
+    """
+
+    if cliente_filtro and cliente_filtro != 'Todos os Clientes':
+        codigo_cliente = cliente_filtro.split(' - ')[0]
+        query += " AND c.codigo_cliente = ?"
+        cursor.execute(query, (codigo_cliente,))
+    else:
+        cursor.execute(query)
+
+    for row in cursor.fetchall():
+        venda_id, data_venda, cliente, total, pago, saldo = row
+        tree.insert("", "end", values=(
+            venda_id,
+            data_venda.strftime("%d/%m/%Y"),
+            cliente,
+            f"R$ {total:.2f}",
+            f"R$ {pago:.2f}",
+            f"R$ {saldo:.2f}"
+        ))
+
     conn.close()
 
-    # Adiciona os clientes ao combobox no formato "código - nome"
-    combobox['values'] = [f"{codigo} - {nome}" for codigo, nome in clientes]
+def filtrar_contas(tree, cliente_filtro):
+    """Filtra as contas pelo cliente selecionado"""
+    carregar_contas(tree, cliente_filtro)
 
-def preencher_produtos(combobox):
-    """Preenche o combobox com os produtos cadastrados no banco de dados."""
+def atualizar_resumo_financeiro():
+    """Atualiza o label com o total a receber"""
+    global label_total_receber
+    total = calcular_total_receber()
+    label_total_receber.config(text=f"Total a Receber: R$ {total:.2f}")
+
+def registrar_pagamento(tree, entry_valor):
+    """Registra um pagamento para a venda selecionada"""
+    selected = tree.selection()
+    if not selected:
+        messagebox.showwarning("Aviso", "Selecione uma venda para registrar o pagamento.")
+        return
+
+    try:
+        valor = float(entry_valor.get().replace("R$", "").strip())
+        if valor <= 0:
+            raise ValueError("O valor deve ser maior que zero.")
+    except ValueError as e:
+        messagebox.showerror("Erro", f"Valor inválido: {str(e)}")
+        return
+
+    venda_id = tree.item(selected[0])['values'][0]
+    saldo_atual = float(tree.item(selected[0])['values'][5].replace("R$", "").replace(",", ".").strip())
+
+    if valor > saldo_atual:
+        messagebox.showerror("Erro", "O valor do pagamento não pode ser maior que o saldo devedor.")
+        return
+
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, tipo, cor, tamanho FROM produtos")
-    produtos = cursor.fetchall()
-    conn.close()
 
-    # Adiciona os produtos ao combobox no formato "id - tipo cor tamanho"
-    combobox['values'] = [f"{id} - {tipo} {cor} {tamanho}" for id, tipo, cor, tamanho in produtos]
+    try:
+        # Obter o cliente_id da venda
+        cursor.execute("SELECT cliente_id FROM vendas WHERE id = ?", (venda_id,))
+        cliente_id = cursor.fetchone()[0]
+
+        # Registrar o pagamento
+        cursor.execute("""
+            INSERT INTO pagamentos (cliente_id, venda_id, valor_pago, data_pagamento)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        """, (cliente_id, venda_id, valor))
+
+        conn.commit()
+        messagebox.showinfo("Sucesso", "Pagamento registrado com sucesso!")
+
+        # Limpar e atualizar
+        entry_valor.delete(0, END)
+        carregar_contas(tree)
+        
+        # Atualizar o resumo financeiro
+        atualizar_resumo_financeiro()
+
+    except sqlite3.Error as e:
+        conn.rollback()
+        messagebox.showerror("Erro", f"Erro ao registrar pagamento: {str(e)}")
+    finally:
+        conn.close()
+
+def calcular_total_receber():
+    """Calcula o total a receber de todas as vendas"""
+    conn = create_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT COALESCE(SUM(
+            valor_total - COALESCE((
+                SELECT SUM(valor_pago) 
+                FROM pagamentos 
+                WHERE venda_id = vendas.id
+            ), 0)
+        ), 0) as total_receber
+        FROM vendas
+        WHERE valor_total > COALESCE((
+            SELECT SUM(valor_pago) 
+            FROM pagamentos 
+            WHERE venda_id = vendas.id
+        ), 0)
+    """)
+
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+def verificar_estrutura_banco():
+    """Verifica se as tabelas necessárias existem e estão corretas"""
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    # Verificar tabela de vendas
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='vendas'
+    """)
+    if not cursor.fetchone():
+        print("Tabela de vendas não encontrada!")
+        return False
+    
+    # Verificar tabela de pagamentos
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='pagamentos'
+    """)
+    if not cursor.fetchone():
+        print("Tabela de pagamentos não encontrada!")
+        return False
+    
+    # Verificar se existem vendas
+    cursor.execute("SELECT COUNT(*) FROM vendas")
+    num_vendas = cursor.fetchone()[0]
+    
+    conn.close()
+    return True
+
+# Chamar esta função no início do programa
+verificar_estrutura_banco()
 
 def remover_item_venda(event=None):
-    """Remove o item selecionado da venda atual"""
+    """Remove um item selecionado da venda atual"""
     selected_item = tree_itens_venda.selection()
     if not selected_item:
-        messagebox.showwarning("Aviso", "Selecione um item para remover.")
+        messagebox.showwarning("Aviso", "Por favor, selecione um item para remover.")
         return
-        
-    tree_itens_venda.delete(selected_item)
-    atualizar_label_total()
+
+    resposta = messagebox.askyesno("Confirmar exclusão", "Tem certeza que deseja remover este item?")
+    if resposta:
+        tree_itens_venda.delete(selected_item)
+        atualizar_label_total()  # Atualiza o total da venda após remover o item
 
 def editar_item_venda(event=None):
-    """Permite editar o item selecionado"""
+    """Permite editar um item da venda"""
     selected_item = tree_itens_venda.selection()
     if not selected_item:
-        messagebox.showwarning("Aviso", "Selecione um item para editar.")
+        messagebox.showwarning("Aviso", "Por favor, selecione um item para editar.")
         return
-        
+
+    # Obter valores atuais
     valores = tree_itens_venda.item(selected_item)['values']
-    
-    # Preencher campos com valores do item selecionado
-    combo_produtos.set(f"{valores[0]} - {valores[1]}")
-    entry_quantidade.delete(0, 'end')
-    entry_quantidade.insert(0, valores[2])
-    entry_valor.delete(0, 'end')
-    entry_valor.insert(0, valores[3])
-    
-    # Remover item da tabela
-    tree_itens_venda.delete(selected_item)
-    atualizar_label_total()
+    produto_id = valores[0]
+    quantidade_atual = valores[2]
+    valor_atual = float(valores[3])
+
+    # Criar janela de edição
+    janela_edicao = Toplevel()
+    janela_edicao.title("Editar Item")
+    janela_edicao.geometry("300x150")
+
+    # Campos de edição
+    Label(janela_edicao, text="Quantidade:").pack(pady=5)
+    entry_quantidade = Entry(janela_edicao)
+    entry_quantidade.insert(0, quantidade_atual)
+    entry_quantidade.pack(pady=5)
+
+    Label(janela_edicao, text="Valor Unitário:").pack(pady=5)
+    entry_valor = Entry(janela_edicao)
+    entry_valor.insert(0, valor_atual)
+    entry_valor.pack(pady=5)
+
+    def salvar_edicao():
+        try:
+            nova_quantidade = int(entry_quantidade.get())
+            novo_valor = float(entry_valor.get())
+
+            if nova_quantidade <= 0:
+                raise ValueError("A quantidade deve ser maior que zero")
+            if novo_valor <= 0:
+                raise ValueError("O valor deve ser maior que zero")
+
+            # Verificar estoque
+            conn = create_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT quantidade FROM produtos WHERE id = ?", (produto_id,))
+            estoque_atual = cursor.fetchone()[0]
+            conn.close()
+
+            if estoque_atual < nova_quantidade:
+                messagebox.showerror("Erro", f"Estoque insuficiente. Disponível: {estoque_atual}")
+                return
+
+            # Atualizar item na tabela
+            subtotal = nova_quantidade * novo_valor
+            tree_itens_venda.item(selected_item, values=(
+                produto_id,
+                valores[1],  # Nome do produto permanece o mesmo
+                nova_quantidade,
+                f"{novo_valor:.2f}",
+                f"{subtotal:.2f}"
+            ))
+
+            atualizar_label_total()
+            janela_edicao.destroy()
+
+        except ValueError as e:
+            messagebox.showerror("Erro", f"Valores inválidos: {str(e)}")
+
+    Button(janela_edicao, text="Salvar", command=salvar_edicao,
+           bg="#4CAF50", fg="white").pack(pady=10)
 
 window = Tk()
 window.geometry("1200x740")
