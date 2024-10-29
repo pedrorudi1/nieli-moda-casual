@@ -168,10 +168,12 @@ def abrir_cadastro_clientes():
     entry_telefone = Entry(window, width=40, font=("Arial", 12))
     canvas.create_window(560, 160, window=entry_telefone, anchor="w")
 
-    btn_cadastrar = Button(window, text="Cadastrar", command=cadastrar_cliente, font=("Arial", 12))
+    btn_cadastrar = Button(window, text="Cadastrar", command=cadastrar_cliente, 
+                          font=("Arial", 12), bg="#4CAF50", fg="white")
     canvas.create_window(650, 290, window=btn_cadastrar)
 
-    btn_excluir = Button(window, text="Excluir", command=excluir_cliente, font=("Arial", 12))
+    btn_excluir = Button(window, text="Excluir", command=excluir_cliente, 
+                        font=("Arial", 12), bg="#f44336", fg="white")
     canvas.create_window(750, 290, window=btn_excluir)
 
     # Adicionar tabela de clientes
@@ -298,13 +300,16 @@ def abrir_cadastro_produtos():
     entry_quantidade = Entry(window, width=40, font=("Arial", 12))
     canvas.create_window(560, 280, window=entry_quantidade, anchor="w")
 
-    btn_cadastrar = Button(window, text="Cadastrar", command=cadastrar_produto, font=("Arial", 12))
+    btn_cadastrar = Button(window, text="Cadastrar", command=cadastrar_produto, 
+                          font=("Arial", 12), bg="#4CAF50", fg="white")
     canvas.create_window(650, 330, window=btn_cadastrar)
 
-    btn_atualizar = Button(window, text="Atualizar", command=atualizar_produto, font=("Arial", 12))
+    btn_atualizar = Button(window, text="Atualizar", command=atualizar_produto, 
+                          font=("Arial", 12), bg="#2196F3", fg="white")
     canvas.create_window(750, 330, window=btn_atualizar)
 
-    btn_excluir = Button(window, text="Excluir", command=excluir_produto, font=("Arial", 12))
+    btn_excluir = Button(window, text="Excluir", command=excluir_produto, 
+                        font=("Arial", 12), bg="#f44336", fg="white")
     canvas.create_window(850, 330, window=btn_excluir)
 
     # Adicionar tabela de produtos
@@ -710,7 +715,7 @@ def abrir_cadastro_vendas():
 def abrir_dashboard():
     janela_dashboard = Toplevel(window)
     janela_dashboard.title("Dashboard")
-    janela_dashboard.geometry("400x350")  # Aumentei um pouco a altura para acomodar a nova informação
+    janela_dashboard.geometry("400x350")  # Aumentei um pouco a altura para acomodar a nova informaç��o
 
     # Obter dados para o dashboard
     vendas_total, vendas_mes_atual, vendas_mes_anterior, total_clientes = obter_dados_dashboard()
