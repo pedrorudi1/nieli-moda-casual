@@ -396,7 +396,7 @@ def atualizar_produto():
     cor = entry_cor.get()
     tamanho = entry_tamanho.get()
     preco_custo = float(entry_preco_custo.get())
-    preco_venda = preco_custo * 3  # Mantendo a lógica de preço de venda como 3x o preço de custo
+    preco_venda = preco_custo * 2
     quantidade = int(entry_quantidade.get())
 
     conn = create_connection()
@@ -652,14 +652,12 @@ def cliente_combobox(frame):
     """Cria e retorna um combobox para seleção de clientes."""
     cliente_var = StringVar()
     combobox = ttk.Combobox(frame, textvariable=cliente_var, width=30)
-    preencher_clientes(combobox)  # Preenche o combobox com os clientes cadastrados
     return combobox, cliente_var
 
 def produto_combobox(frame):
     """Cria e retorna um combobox para seleção de produtos."""
     produto_var = StringVar()
     combobox = ttk.Combobox(frame, textvariable=produto_var, width=30)
-    preencher_produtos(combobox)  # Preenche o combobox com os produtos cadastrados
     return combobox, produto_var
 
 def abrir_cadastro_vendas():
