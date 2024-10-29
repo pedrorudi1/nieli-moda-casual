@@ -1,30 +1,61 @@
+# import pyi_splash
 import sqlite3
 from datetime import datetime, date, timedelta
-from tkinter import Tk, Canvas, Entry, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame, StringVar, END, LEFT, RIGHT
+import pytz
+from tkinter import Tk, Canvas, Entry, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame, StringVar, END, LEFT, RIGHT, BOTH
+
+# Definir o fuso horário de São Paulo
+FUSO_HORARIO = pytz.timezone('America/Sao_Paulo')
 
 # Definir adaptadores personalizados para datetime e date
 def adapt_datetime(dt):
+    """Converte datetime para string ISO com fuso horário"""
+    if dt.tzinfo is None:
+        dt = FUSO_HORARIO.localize(dt)
     return dt.isoformat()
 
 def adapt_date(d):
     return d.isoformat()
 
 def convert_datetime(s):
-    return datetime.fromisoformat(s.decode())
+    """Converte string ISO para datetime com fuso horário"""
+    dt = datetime.fromisoformat(s.decode())
+    if dt.tzinfo is None:
+        dt = FUSO_HORARIO.localize(dt)
+    return dt
 
 def convert_date(s):
     return date.fromisoformat(s.decode())
 
 def convert_timestamp(val):
-    datepart, timepart = val.decode().split(" ")
-    year, month, day = map(int, datepart.split("-"))
-    timepart_full = timepart.split(".")
-    hours, minutes, seconds = map(int, timepart_full[0].split(":"))
-    if len(timepart_full) == 2:
-        microseconds = int(timepart_full[1])
-    else:
-        microseconds = 0
-    return datetime(year, month, day, hours, minutes, seconds, microseconds)
+    """Converte timestamp para datetime com fuso horário"""
+    try:
+        # Tenta converter diretamente se estiver em formato ISO
+        dt = datetime.fromisoformat(val.decode())
+        if dt.tzinfo is None:
+            dt = FUSO_HORARIO.localize(dt)
+        return dt
+    except ValueError:
+        try:
+            # Tenta o formato antigo "YYYY-MM-DD HH:MM:SS.mmmmmm"
+            datepart, timepart = val.decode().split(" ")
+            year, month, day = map(int, datepart.split("-"))
+            timepart_full = timepart.split(".")
+            hours, minutes, seconds = map(int, timepart_full[0].split(":"))
+            if len(timepart_full) == 2:
+                microseconds = int(timepart_full[1])
+            else:
+                microseconds = 0
+            dt = datetime(year, month, day, hours, minutes, seconds, microseconds)
+            return FUSO_HORARIO.localize(dt)
+        except (ValueError, IndexError):
+            # Se falhar, tenta interpretar como data simples
+            try:
+                dt = datetime.strptime(val.decode(), "%Y-%m-%d")
+                return FUSO_HORARIO.localize(dt)
+            except ValueError:
+                # Se tudo falhar, retorna a data atual
+                return datetime.now(FUSO_HORARIO)
 
 # Registrar os adaptadores e conversores
 sqlite3.register_adapter(datetime, adapt_datetime)
@@ -39,11 +70,7 @@ def create_connection():
                          detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
 
 
-# No início do arquivo, adicione esta variável global
-global tree_produtos, tree_clientes, label_total
-
-# Variáveis globais
-global combo_clientes, combo_produtos, entry_quantidade, entry_valor, label_estoque, tree_vendas, tree_itens_venda, label_total, tree_vendas
+global combo_clientes, combo_produtos, entry_quantidade, entry_valor, label_estoque, tree_vendas, tree_itens_venda, label_total, tree_produtos, tree_clientes
 itens_venda = []
 
 def criar_banco_dados():
@@ -145,10 +172,11 @@ def cadastrar_cliente():
     cursor = conn.cursor()
     
     try:
+        agora = datetime.now(FUSO_HORARIO)
         cursor.execute("""
             INSERT INTO clientes (nome, telefone, data_cadastro)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-        """, (nome, telefone))
+            VALUES (?, ?, ?)
+        """, (nome, telefone, agora))
         
         conn.commit()
         messagebox.showinfo("Sucesso", "Cliente cadastrado com sucesso!")
@@ -471,28 +499,47 @@ def atualizar_tabela_vendas():
     # Preencher com os dados atualizados
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT v.id, c.nome, v.valor_total, v.data_venda
-        FROM vendas v
-        JOIN clientes c ON v.cliente_id = c.codigo_cliente
-        ORDER BY v.data_venda DESC
-    """)
-    vendas = cursor.fetchall()
-    conn.close()
-
-    for venda in vendas:
-        # Formatar o valor e a data
-        valor_formatado = f"R$ {venda[2]:.2f}"
-        data_formatada = venda[3].strftime("%d/%m/%Y %H:%M")
-        tree_vendas.insert("", "end", values=(venda[0], venda[1], valor_formatado, data_formatada))
+    try:
+        cursor.execute("""
+            SELECT v.id, c.nome, v.valor_total, v.data_venda
+            FROM vendas v
+            JOIN clientes c ON v.cliente_id = c.codigo_cliente
+            ORDER BY v.data_venda DESC
+        """)
+        vendas = cursor.fetchall()
+        
+        for venda in vendas:
+            # Formatar o valor e a data
+            valor_formatado = f"R$ {venda[2]:.2f}"
+            # Garantir que a data seja um objeto datetime
+            if isinstance(venda[3], datetime):
+                data_venda = venda[3]
+            else:
+                data_venda = convert_timestamp(venda[3].encode())
+            data_formatada = data_venda.strftime("%d/%m/%Y %H:%M")
+            
+            tree_vendas.insert("", "end", values=(
+                venda[0],
+                venda[1],
+                valor_formatado,
+                data_formatada
+            ))
+    except Exception as e:
+        print(f"Erro ao atualizar tabela de vendas: {e}")
+    finally:
+        conn.close()
 
 def atualizar_estoque_e_valor(produto_id):
+    """Retorna a quantidade em estoque e preço de venda de um produto"""
     conn = create_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT quantidade, preco_venda FROM produtos WHERE id = ?", (produto_id,))
     resultado = cursor.fetchone()
     conn.close()
-    return resultado  # Retorna (quantidade, preco_venda)
+    
+    if resultado is None:
+        return 0, 0.0  # Retorna valores padrão se o produto não for encontrado
+    return resultado
 
 def calcular_total_venda():
     """Calcula o total da venda atual baseado nos itens da tree_itens_venda"""
@@ -582,11 +629,11 @@ def finalizar_venda():
         conn.execute("BEGIN TRANSACTION")
         
         try:
-            # Inserir venda
+            agora = datetime.now(FUSO_HORARIO)
             cursor.execute("""
                 INSERT INTO vendas (cliente_id, valor_total, data_venda)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-            """, (cliente_id, valor_total))
+                VALUES (?, ?, ?)
+            """, (cliente_id, valor_total, agora))
             
             venda_id = cursor.lastrowid
 
@@ -596,6 +643,11 @@ def finalizar_venda():
                 produto_id = valores[0]
                 quantidade = int(valores[2])
                 valor_unitario = float(valores[3])
+
+                # Verificar estoque antes de finalizar
+                estoque_atual, _ = atualizar_estoque_e_valor(produto_id)
+                if estoque_atual < quantidade:
+                    raise ValueError(f"Estoque insuficiente para o produto ID {produto_id}")
 
                 cursor.execute("""
                     INSERT INTO itens_venda (venda_id, produto_id, quantidade, valor_unitario)
@@ -620,6 +672,10 @@ def finalizar_venda():
         except sqlite3.Error as e:
             conn.rollback()
             messagebox.showerror("Erro", f"Erro ao finalizar venda: {str(e)}")
+            return
+        except ValueError as e:
+            conn.rollback()
+            messagebox.showerror("Erro", str(e))
             return
         finally:
             conn.close()
@@ -1017,8 +1073,132 @@ def abrir_contas_receber():
     # Carregar dados iniciais
     carregar_contas(tree_contas)
 
-def carregar_contas(tree, cliente_filtro=None):
-    """Carrega as contas a receber na tabela"""
+    # Criar notebook (sistema de abas)
+    notebook = ttk.Notebook(window)
+    canvas.create_window(700, 350, window=notebook, width=800, height=600)
+
+    # Aba de Contas a Receber
+    tab_contas = Frame(notebook)
+    notebook.add(tab_contas, text="Contas a Receber")
+
+    # Aba de Histórico de Pagamentos
+    tab_historico = Frame(notebook)
+    notebook.add(tab_historico, text="Histórico de Pagamentos")
+
+    # Frame para filtros (na aba de contas)
+    frame_filtros = Frame(tab_contas)
+    frame_filtros.pack(pady=10)
+
+    # Combobox de clientes
+    Label(frame_filtros, text="Filtrar por Cliente:", font=("Arial", 12)).pack(side=LEFT, padx=5)
+    combo_filtro_clientes = ttk.Combobox(frame_filtros, width=40)
+    combo_filtro_clientes['values'] = ['Todos os Clientes'] + consultar_clientes()
+    combo_filtro_clientes.set('Todos os Clientes')
+    combo_filtro_clientes.pack(side=LEFT, padx=5)
+
+    btn_filtrar = Button(frame_filtros, text="Filtrar", 
+                        command=lambda: filtrar_contas(tree_contas, combo_filtro_clientes.get()),
+                        font=("Arial", 12), bg="#2196F3", fg="white")
+    btn_filtrar.pack(side=LEFT, padx=5)
+
+    # Tabela de contas a receber
+    tree_contas = ttk.Treeview(tab_contas, 
+                              columns=("ID", "Data", "Cliente", "Total", "Pago", "Saldo"),
+                              show="headings", 
+                              height=10)
+
+    # Configuração das colunas
+    tree_contas.heading("ID", text="ID")
+    tree_contas.heading("Data", text="Data")
+    tree_contas.heading("Cliente", text="Cliente")
+    tree_contas.heading("Total", text="Total Venda")
+    tree_contas.heading("Pago", text="Valor Pago")
+    tree_contas.heading("Saldo", text="Saldo")
+
+    tree_contas.column("ID", width=50, anchor="center")
+    tree_contas.column("Data", width=100, anchor="center")
+    tree_contas.column("Cliente", width=200)
+    tree_contas.column("Total", width=100, anchor="e")
+    tree_contas.column("Pago", width=100, anchor="e")
+    tree_contas.column("Saldo", width=100, anchor="e")
+
+    tree_contas.pack(pady=10, padx=10, fill=BOTH, expand=True)
+
+    # Frame para pagamentos
+    frame_pagamento = Frame(tab_contas)
+    frame_pagamento.pack(pady=10)
+
+    # Campo para valor do pagamento
+    Label(frame_pagamento, text="Valor do Pagamento: R$", 
+          font=("Arial", 12)).grid(row=0, column=0, padx=5, pady=5)
+    entry_valor = Entry(frame_pagamento, width=15, font=("Arial", 12))
+    entry_valor.grid(row=0, column=1, padx=5, pady=5)
+
+    # Botão de registrar pagamento
+    btn_registrar = Button(frame_pagamento, 
+                          text="Registrar Pagamento",
+                          command=lambda: registrar_pagamento(tree_contas, entry_valor),
+                          font=("Arial", 12), 
+                          bg="#4CAF50", 
+                          fg="white")
+    btn_registrar.grid(row=0, column=2, padx=20, pady=5)
+
+    # NOVA SEÇÃO: Histórico de Pagamentos
+    # Frame para filtros do histórico
+    frame_filtros_historico = Frame(tab_historico)
+    frame_filtros_historico.pack(pady=10)
+
+    Label(frame_filtros_historico, text="Filtrar por Cliente:", font=("Arial", 12)).pack(side=LEFT, padx=5)
+    combo_filtro_historico = ttk.Combobox(frame_filtros_historico, width=40)
+    combo_filtro_historico['values'] = ['Todos os Clientes'] + consultar_clientes()
+    combo_filtro_historico.set('Todos os Clientes')
+    combo_filtro_historico.pack(side=LEFT, padx=5)
+
+    # Filtros de data
+    Label(frame_filtros_historico, text="De:", font=("Arial", 12)).pack(side=LEFT, padx=5)
+    data_inicial = Entry(frame_filtros_historico, width=10)
+    data_inicial.pack(side=LEFT, padx=2)
+    
+    Label(frame_filtros_historico, text="Até:", font=("Arial", 12)).pack(side=LEFT, padx=5)
+    data_final = Entry(frame_filtros_historico, width=10)
+    data_final.pack(side=LEFT, padx=2)
+
+    btn_filtrar_historico = Button(frame_filtros_historico, text="Filtrar", 
+                                 command=lambda: filtrar_historico_pagamentos(
+                                     tree_historico, 
+                                     combo_filtro_historico.get(),
+                                     data_inicial.get(),
+                                     data_final.get()
+                                 ),
+                                 font=("Arial", 12), bg="#2196F3", fg="white")
+    btn_filtrar_historico.pack(side=LEFT, padx=5)
+
+    # Tabela de histórico de pagamentos
+    tree_historico = ttk.Treeview(tab_historico, 
+                                 columns=("ID", "Data Pagamento", "Cliente", "Venda", "Valor Pago"),
+                                 show="headings", 
+                                 height=15)
+
+    tree_historico.heading("ID", text="ID")
+    tree_historico.heading("Data Pagamento", text="Data Pagamento")
+    tree_historico.heading("Cliente", text="Cliente")
+    tree_historico.heading("Venda", text="Venda")
+    tree_historico.heading("Valor Pago", text="Valor Pago")
+
+    tree_historico.column("ID", width=50, anchor="center")
+    tree_historico.column("Data Pagamento", width=150, anchor="center")
+    tree_historico.column("Cliente", width=200)
+    tree_historico.column("Venda", width=100, anchor="center")
+    tree_historico.column("Valor Pago", width=100, anchor="e")
+
+    tree_historico.pack(pady=10, padx=10, fill=BOTH, expand=True)
+
+    # Carregar dados iniciais
+    carregar_contas(tree_contas)
+    carregar_historico_pagamentos(tree_historico)
+
+def carregar_historico_pagamentos(tree, cliente_filtro=None, data_inicial=None, data_final=None):
+    """Carrega o histórico de pagamentos na tabela"""
     for item in tree.get_children():
         tree.delete(item)
 
@@ -1027,135 +1207,57 @@ def carregar_contas(tree, cliente_filtro=None):
 
     query = """
         SELECT 
-            v.id,
-            v.data_venda,
+            p.id,
+            p.data_pagamento,
             c.nome,
-            v.valor_total,
-            COALESCE((
-                SELECT SUM(valor_pago) 
-                FROM pagamentos 
-                WHERE venda_id = v.id
-            ), 0) as valor_pago,
-            v.valor_total - COALESCE((
-                SELECT SUM(valor_pago) 
-                FROM pagamentos 
-                WHERE venda_id = v.id
-            ), 0) as saldo
-        FROM vendas v
-        JOIN clientes c ON v.cliente_id = c.codigo_cliente
-        WHERE v.valor_total > COALESCE((
-            SELECT SUM(valor_pago) 
-            FROM pagamentos 
-            WHERE venda_id = v.id
-        ), 0)
+            p.venda_id,
+            p.valor_pago
+        FROM pagamentos p
+        JOIN clientes c ON p.cliente_id = c.codigo_cliente
+        WHERE 1=1
     """
+    params = []
 
     if cliente_filtro and cliente_filtro != 'Todos os Clientes':
         codigo_cliente = cliente_filtro.split(' - ')[0]
         query += " AND c.codigo_cliente = ?"
-        cursor.execute(query, (codigo_cliente,))
-    else:
-        cursor.execute(query)
+        params.append(codigo_cliente)
 
+    if data_inicial:
+        try:
+            data_inicial = datetime.strptime(data_inicial, "%d/%m/%Y")
+            query += " AND date(p.data_pagamento) >= date(?)"
+            params.append(data_inicial.strftime("%Y-%m-%d"))
+        except ValueError:
+            pass
+
+    if data_final:
+        try:
+            data_final = datetime.strptime(data_final, "%d/%m/%Y")
+            query += " AND date(p.data_pagamento) <= date(?)"
+            params.append(data_final.strftime("%Y-%m-%d"))
+        except ValueError:
+            pass
+
+    query += " ORDER BY p.data_pagamento DESC"
+
+    cursor.execute(query, params)
     for row in cursor.fetchall():
-        venda_id, data_venda, cliente, total, pago, saldo = row
+        pagamento_id, data_pagamento, cliente, venda_id, valor = row
         tree.insert("", "end", values=(
-            venda_id,
-            data_venda.strftime("%d/%m/%Y"),
+            pagamento_id,
+            data_pagamento.strftime("%d/%m/%Y %H:%M") if isinstance(data_pagamento, datetime) 
+            else convert_timestamp(data_pagamento.encode()).strftime("%d/%m/%Y %H:%M"),
             cliente,
-            f"R$ {total:.2f}",
-            f"R$ {pago:.2f}",
-            f"R$ {saldo:.2f}"
+            f"#{venda_id}",
+            f"R$ {valor:.2f}"
         ))
 
     conn.close()
 
-def filtrar_contas(tree, cliente_filtro):
-    """Filtra as contas pelo cliente selecionado"""
-    carregar_contas(tree, cliente_filtro)
-
-def atualizar_resumo_financeiro():
-    """Atualiza o label com o total a receber"""
-    global label_total_receber
-    total = calcular_total_receber()
-    label_total_receber.config(text=f"Total a Receber: R$ {total:.2f}")
-
-def registrar_pagamento(tree, entry_valor):
-    """Registra um pagamento para a venda selecionada"""
-    selected = tree.selection()
-    if not selected:
-        messagebox.showwarning("Aviso", "Selecione uma venda para registrar o pagamento.")
-        return
-
-    try:
-        valor = float(entry_valor.get().replace("R$", "").strip())
-        if valor <= 0:
-            raise ValueError("O valor deve ser maior que zero.")
-    except ValueError as e:
-        messagebox.showerror("Erro", f"Valor inválido: {str(e)}")
-        return
-
-    venda_id = tree.item(selected[0])['values'][0]
-    saldo_atual = float(tree.item(selected[0])['values'][5].replace("R$", "").replace(",", ".").strip())
-
-    if valor > saldo_atual:
-        messagebox.showerror("Erro", "O valor do pagamento não pode ser maior que o saldo devedor.")
-        return
-
-    conn = create_connection()
-    cursor = conn.cursor()
-
-    try:
-        # Obter o cliente_id da venda
-        cursor.execute("SELECT cliente_id FROM vendas WHERE id = ?", (venda_id,))
-        cliente_id = cursor.fetchone()[0]
-
-        # Registrar o pagamento
-        cursor.execute("""
-            INSERT INTO pagamentos (cliente_id, venda_id, valor_pago, data_pagamento)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        """, (cliente_id, venda_id, valor))
-
-        conn.commit()
-        messagebox.showinfo("Sucesso", "Pagamento registrado com sucesso!")
-
-        # Limpar e atualizar
-        entry_valor.delete(0, END)
-        carregar_contas(tree)
-        
-        # Atualizar o resumo financeiro
-        atualizar_resumo_financeiro()
-
-    except sqlite3.Error as e:
-        conn.rollback()
-        messagebox.showerror("Erro", f"Erro ao registrar pagamento: {str(e)}")
-    finally:
-        conn.close()
-
-def calcular_total_receber():
-    """Calcula o total a receber de todas as vendas"""
-    conn = create_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT COALESCE(SUM(
-            valor_total - COALESCE((
-                SELECT SUM(valor_pago) 
-                FROM pagamentos 
-                WHERE venda_id = vendas.id
-            ), 0)
-        ), 0) as total_receber
-        FROM vendas
-        WHERE valor_total > COALESCE((
-            SELECT SUM(valor_pago) 
-            FROM pagamentos 
-            WHERE venda_id = vendas.id
-        ), 0)
-    """)
-
-    total = cursor.fetchone()[0]
-    conn.close()
-    return total
+def filtrar_historico_pagamentos(tree, cliente_filtro, data_inicial, data_final):
+    """Filtra o histórico de pagamentos"""
+    carregar_historico_pagamentos(tree, cliente_filtro, data_inicial, data_final)
 
 def verificar_estrutura_banco():
     """Verifica se as tabelas necessárias existem e estão corretas"""
@@ -1296,6 +1398,214 @@ def adicionar_coluna_data_cadastro():
 # Chamar esta função ao iniciar o programa
 adicionar_coluna_data_cadastro()
 
+def calcular_total_receber():
+    """Calcula o total de valores a receber"""
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Calcula o total de vendas
+        cursor.execute("""
+            SELECT COALESCE(SUM(valor_total), 0)
+            FROM vendas
+        """)
+        total_vendas = cursor.fetchone()[0]
+        
+        # Calcula o total já pago
+        cursor.execute("""
+            SELECT COALESCE(SUM(valor_pago), 0)
+            FROM pagamentos
+        """)
+        total_pago = cursor.fetchone()[0]
+        
+        # O total a receber é a diferença
+        total_receber = total_vendas - total_pago
+        
+        return total_receber
+        
+    except sqlite3.Error as e:
+        print(f"Erro ao calcular total a receber: {e}")
+        return 0.0
+    finally:
+        conn.close()
+
+def atualizar_total_receber():
+    """Atualiza o label com o total a receber"""
+    global label_total_receber
+    if 'label_total_receber' in globals():
+        total = calcular_total_receber()
+        label_total_receber.config(text=f"Total a Receber: R$ {total:.2f}")
+
+def registrar_pagamento(tree, entry_valor):
+    """Registra um novo pagamento"""
+    selected_item = tree.selection()
+    if not selected_item:
+        messagebox.showerror("Erro", "Selecione uma venda para registrar o pagamento.")
+        return
+
+    try:
+        valor = float(entry_valor.get())
+        if valor <= 0:
+            raise ValueError("O valor deve ser maior que zero")
+    except ValueError as e:
+        messagebox.showerror("Erro", f"Valor inválido: {str(e)}")
+        return
+
+    venda_id = tree.item(selected_item)['values'][0]
+    
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Obter informações da venda
+        cursor.execute("""
+            SELECT v.cliente_id, v.valor_total, 
+                   (SELECT COALESCE(SUM(valor_pago), 0) FROM pagamentos WHERE venda_id = v.id)
+            FROM vendas v
+            WHERE v.id = ?
+        """, (venda_id,))
+        
+        cliente_id, valor_total, valor_ja_pago = cursor.fetchone()
+        saldo = valor_total - valor_ja_pago
+
+        if valor > saldo:
+            messagebox.showerror("Erro", f"Valor excede o saldo devedor (R$ {saldo:.2f})")
+            return
+
+        # Registrar o pagamento
+        agora = datetime.now(FUSO_HORARIO)
+        cursor.execute("""
+            INSERT INTO pagamentos (cliente_id, venda_id, valor_pago, data_pagamento)
+            VALUES (?, ?, ?, ?)
+        """, (cliente_id, venda_id, valor, agora))
+
+        conn.commit()
+        messagebox.showinfo("Sucesso", "Pagamento registrado com sucesso!")
+        
+        # Limpar campo de valor
+        entry_valor.delete(0, END)
+        
+        # Atualizar as tabelas
+        carregar_contas(tree)
+        atualizar_total_receber()
+        
+        # Se estiver usando a tree_historico, atualizar também
+        if 'tree_historico' in globals():
+            carregar_historico_pagamentos(tree_historico)
+            
+    except sqlite3.Error as e:
+        conn.rollback()
+        messagebox.showerror("Erro", f"Erro ao registrar pagamento: {str(e)}")
+    finally:
+        conn.close()
+
+def carregar_contas(tree):
+    """Carrega as contas a receber na tabela"""
+    for item in tree.get_children():
+        tree.delete(item)
+
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            SELECT 
+                v.id,
+                v.data_venda,
+                c.nome,
+                v.valor_total,
+                COALESCE((SELECT SUM(valor_pago) FROM pagamentos WHERE venda_id = v.id), 0) as valor_pago,
+                v.valor_total - COALESCE((SELECT SUM(valor_pago) FROM pagamentos WHERE venda_id = v.id), 0) as saldo
+            FROM vendas v
+            JOIN clientes c ON v.cliente_id = c.codigo_cliente
+            WHERE v.valor_total > COALESCE((SELECT SUM(valor_pago) FROM pagamentos WHERE venda_id = v.id), 0)
+            ORDER BY v.data_venda DESC
+        """)
+        
+        for row in cursor.fetchall():
+            venda_id, data_venda, cliente, valor_total, valor_pago, saldo = row
+            
+            # Converter e formatar a data
+            if isinstance(data_venda, datetime):
+                data_formatada = data_venda.strftime("%d/%m/%Y %H:%M")
+            else:
+                data_formatada = convert_timestamp(data_venda.encode()).strftime("%d/%m/%Y %H:%M")
+            
+            tree.insert("", "end", values=(
+                venda_id,
+                data_formatada,
+                cliente,
+                f"R$ {valor_total:.2f}",
+                f"R$ {valor_pago:.2f}",
+                f"R$ {saldo:.2f}"
+            ))
+            
+    except sqlite3.Error as e:
+        print(f"Erro ao carregar contas: {e}")
+    finally:
+        conn.close()
+
+def filtrar_contas(tree, cliente_filtro):
+    """Filtra as contas a receber por cliente"""
+    for item in tree.get_children():
+        tree.delete(item)
+
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    try:
+        query = """
+            SELECT 
+                v.id,
+                v.data_venda,
+                c.nome,
+                v.valor_total,
+                COALESCE((SELECT SUM(valor_pago) FROM pagamentos WHERE venda_id = v.id), 0) as valor_pago,
+                v.valor_total - COALESCE((SELECT SUM(valor_pago) FROM pagamentos WHERE venda_id = v.id), 0) as saldo
+            FROM vendas v
+            JOIN clientes c ON v.cliente_id = c.codigo_cliente
+            WHERE v.valor_total > COALESCE((SELECT SUM(valor_pago) FROM pagamentos WHERE venda_id = v.id), 0)
+        """
+        
+        params = []
+        
+        # Adicionar filtro de cliente se não for "Todos os Clientes"
+        if cliente_filtro and cliente_filtro != 'Todos os Clientes':
+            codigo_cliente = cliente_filtro.split(' - ')[0]
+            query += " AND c.codigo_cliente = ?"
+            params.append(codigo_cliente)
+            
+        query += " ORDER BY v.data_venda DESC"
+        
+        cursor.execute(query, params)
+        
+        for row in cursor.fetchall():
+            venda_id, data_venda, cliente, valor_total, valor_pago, saldo = row
+            
+            # Converter e formatar a data
+            if isinstance(data_venda, datetime):
+                data_formatada = data_venda.strftime("%d/%m/%Y %H:%M")
+            else:
+                data_formatada = convert_timestamp(data_venda.encode()).strftime("%d/%m/%Y %H:%M")
+            
+            tree.insert("", "end", values=(
+                venda_id,
+                data_formatada,
+                cliente,
+                f"R$ {valor_total:.2f}",
+                f"R$ {valor_pago:.2f}",
+                f"R$ {saldo:.2f}"
+            ))
+            
+        # Atualizar o total após a filtragem
+        atualizar_total_receber()
+            
+    except sqlite3.Error as e:
+        print(f"Erro ao filtrar contas: {e}")
+        messagebox.showerror("Erro", f"Erro ao filtrar contas: {str(e)}")
+    finally:
+        conn.close()
+
 window = Tk()
 window.geometry("1200x740")
 window.configure(bg = "#F8EBFF")
@@ -1324,4 +1634,5 @@ BtnDashboard = Button(window, text='Dashboard', image=FotoRelatorios, command=ab
 BtnDashboard.place(x=52.0, y=544.0)
 
 window.resizable(False, False)
+# pyi_splash.close()
 window.mainloop()
