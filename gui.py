@@ -50,12 +50,12 @@ def criar_banco_dados():
     conn = create_connection()
     cursor = conn.cursor()
     
-    # Tabela de clientes
+    # Tabela de clientes com código sequencial
     cursor.execute('''CREATE TABLE IF NOT EXISTS clientes
-                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       codigo_cliente TEXT UNIQUE,
+                      (codigo_cliente INTEGER PRIMARY KEY AUTOINCREMENT,
                        nome TEXT NOT NULL,
-                       telefone TEXT)''')
+                       telefone TEXT,
+                       data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     
     # Tabela de produtos
     cursor.execute('''CREATE TABLE IF NOT EXISTS produtos
@@ -101,46 +101,73 @@ def criar_banco_dados():
 # Certifique-se de chamar esta função no início do seu programa
 criar_banco_dados()
 
+def atualizar_tabela_clientes():
+    """Atualiza a tabela de clientes com os dados do banco"""
+    # Limpar tabela
+    for item in tree_clientes.get_children():
+        tree_clientes.delete(item)
+    
+    # Buscar dados atualizados
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT codigo_cliente, nome, COALESCE(telefone, '-') as telefone
+        FROM clientes
+        ORDER BY codigo_cliente
+    """)
+    
+    # Inserir dados na tabela
+    for row in cursor.fetchall():
+        codigo, nome, telefone = row
+        tree_clientes.insert("", "end", values=(
+            codigo,  # Não precisa mais formatar como string
+            nome,
+            telefone
+        ))
+    
+    conn.close()
+
 def cadastrar_cliente():
-    global tree_clientes
+    """Cadastra um novo cliente no banco de dados"""
+    nome = entry_nome.get().strip()
+    telefone = entry_telefone.get().strip()
     
-    codigo_cliente = gerar_codigo_cliente()  # Você precisa implementar esta função
-    nome = entry_nome.get()
-    telefone = entry_telefone.get()
-
-
+    if not nome:
+        messagebox.showerror("Erro", "Por favor, preencha o nome do cliente.")
+        return
+    
+    # Se o telefone estiver vazio, usar None
+    if not telefone:
+        telefone = None
+    
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO clientes (codigo_cliente, nome, telefone) VALUES (?, ?, ?)",
-                   (codigo_cliente, nome, telefone))
-    conn.commit()
-    conn.close()
-
-    # Limpar campos após cadastro
-    entry_nome.delete(0, END)
-    entry_telefone.delete(0, END)
-
-    # Inserir novo cliente na tabela
-    if 'tree_clientes' in globals() and tree_clientes:
-        tree_clientes.insert("", "end", values=(codigo_cliente, nome, telefone))
-    else:
-        print("Erro: A tabela de clientes não foi encontrada.")
-
-    messagebox.showinfo("Sucesso", "Cliente cadastrado com sucesso!")
-
-def gerar_codigo_cliente():
-    conn = create_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT MAX(CAST(codigo_cliente AS INTEGER)) FROM clientes")
-    ultimo_codigo = cursor.fetchone()[0]
-    conn.close()
     
-    if ultimo_codigo is None:
-        return "1"
-    else:
-        return str(int(ultimo_codigo) + 1)
+    try:
+        cursor.execute("""
+            INSERT INTO clientes (nome, telefone, data_cadastro)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (nome, telefone))
+        
+        conn.commit()
+        messagebox.showinfo("Sucesso", "Cliente cadastrado com sucesso!")
+        
+        # Limpar campos
+        entry_nome.delete(0, END)
+        entry_telefone.delete(0, END)
+        
+        # Atualizar tabela
+        atualizar_tabela_clientes()
+        
+    except sqlite3.Error as e:
+        conn.rollback()
+        messagebox.showerror("Erro", f"Erro ao cadastrar cliente: {str(e)}")
+    finally:
+        conn.close()
 
 def excluir_cliente(event=None):
+    """Exclui um cliente selecionado"""
     selected_item = tree_clientes.selection()
     if not selected_item:
         messagebox.showwarning("Aviso", "Por favor, selecione um cliente para excluir.")
@@ -153,6 +180,12 @@ def excluir_cliente(event=None):
         conn = create_connection()
         cursor = conn.cursor()
         try:
+            # Verificar se o cliente tem vendas
+            cursor.execute("SELECT COUNT(*) FROM vendas WHERE cliente_id = ?", (codigo_cliente,))
+            if cursor.fetchone()[0] > 0:
+                messagebox.showerror("Erro", "Não é possível excluir um cliente que possui vendas registradas.")
+                return
+
             cursor.execute("DELETE FROM clientes WHERE codigo_cliente = ?", (codigo_cliente,))
             conn.commit()
             tree_clientes.delete(selected_item)
@@ -386,9 +419,10 @@ def atualizar_produto():
     entry_quantidade.delete(0, END)
 
 def consultar_clientes():
+    """Retorna lista de clientes para combobox"""
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT codigo_cliente, nome FROM clientes")
+    cursor.execute("SELECT codigo_cliente, nome FROM clientes ORDER BY codigo_cliente")
     clientes = cursor.fetchall()
     conn.close()
     return [f"{codigo} - {nome}" for codigo, nome in clientes]
@@ -476,7 +510,6 @@ def atualizar_label_total():
 
 def adicionar_item_venda():
     """Adiciona um item à venda atual"""
-    # Validações básicas
     if not combo_produtos.get():
         messagebox.showerror("Erro", "Por favor, selecione um produto.")
         return
@@ -557,19 +590,18 @@ def finalizar_venda():
             
             venda_id = cursor.lastrowid
 
-            # Inserir itens da venda e atualizar estoque
+            # Inserir itens da venda
             for item in tree_itens_venda.get_children():
                 valores = tree_itens_venda.item(item)['values']
                 produto_id = valores[0]
                 quantidade = int(valores[2])
                 valor_unitario = float(valores[3])
 
-                # Inserir item da venda
                 cursor.execute("""
                     INSERT INTO itens_venda (venda_id, produto_id, quantidade, valor_unitario)
                     VALUES (?, ?, ?, ?)
                 """, (venda_id, produto_id, quantidade, valor_unitario))
-
+                
                 # Atualizar estoque
                 cursor.execute("""
                     UPDATE produtos 
@@ -728,68 +760,176 @@ def abrir_cadastro_vendas():
     atualizar_tabela_vendas()
 
 def abrir_dashboard():
-    janela_dashboard = Toplevel(window)
-    janela_dashboard.title("Dashboard")
-    janela_dashboard.geometry("400x350")  # Aumentei um pouco a altura para acomodar a nova informaço
+    """Abre a tela de dashboard com indicadores de desempenho"""
+    # Limpar canvas e configurar background
+    canvas.delete("all")
+    canvas.create_image(0, 0, image=FotoBG, anchor="nw")
+    canvas.create_text(700, 30, text="Dashboard", font=("Arial", 24))
 
-    # Obter dados para o dashboard
-    vendas_total, vendas_mes_atual, vendas_mes_anterior, total_clientes = obter_dados_dashboard()
+    # Frame principal
+    frame_dashboard = Frame(window)
+    canvas.create_window(700, 350, window=frame_dashboard, width=800)
 
-    # Criar frame para organizar o layout
-    frame_dashboard = Frame(janela_dashboard, borderwidth=2, relief="ridge")
-    frame_dashboard.pack(fill="both", expand=True, padx=10, pady=10)
+    # Estilo para os frames de indicadores
+    style_frame = {"relief": "ridge", "borderwidth": 2, "padx": 15, "pady": 15}
+    style_titulo = {"font": ("Arial", 14, "bold"), "pady": 10}
+    style_valor = {"font": ("Arial", 12), "pady": 5}
 
-    # Título
-    Label(frame_dashboard, text="Dashboard", font=("Arial", 16, "bold")).pack(pady=10)
+    # Frame Clientes
+    frame_clientes = Frame(frame_dashboard, **style_frame)
+    frame_clientes.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
     
-    # Vendas
-    Label(frame_dashboard, text="Vendas", font=("Arial", 14, "bold")).pack(anchor="w", padx=10, pady=5)
-    Label(frame_dashboard, text=f"Total de Vendas: R$ {vendas_total:.2f}", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
-    Label(frame_dashboard, text=f"Vendas no Mês Atual: R$ {vendas_mes_atual:.2f}", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
-    Label(frame_dashboard, text=f"Vendas no Mês Anterior: R$ {vendas_mes_anterior:.2f}", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
+    Label(frame_clientes, text="Clientes", **style_titulo).pack()
+    
+    total_clientes = obter_dados_clientes()
+    Label(frame_clientes, text=f"Total de Clientes: {total_clientes}", **style_valor).pack()
 
-    # Clientes
-    Label(frame_dashboard, text="Clientes", font=("Arial", 14, "bold")).pack(anchor="w", padx=10, pady=5)
-    Label(frame_dashboard, text=f"Total de Clientes Cadastrados: {total_clientes}", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
+    # Frame Vendas
+    frame_vendas = Frame(frame_dashboard, **style_frame)
+    frame_vendas.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+    
+    Label(frame_vendas, text="Vendas", **style_titulo).pack()
+    
+    vendas_mes, vendas_trimestre = obter_dados_vendas()
+    Label(frame_vendas, text=f"Vendas (Mês Atual): R$ {vendas_mes:.2f}", **style_valor).pack()
+    Label(frame_vendas, text=f"Vendas (3 Meses): R$ {vendas_trimestre:.2f}", **style_valor).pack()
 
-def obter_dados_dashboard():
+    # Frame Recebimentos
+    frame_recebimentos = Frame(frame_dashboard, **style_frame)
+    frame_recebimentos.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+    
+    Label(frame_recebimentos, text="Recebimentos", **style_titulo).pack()
+    
+    recebido_mes, recebido_trimestre = obter_dados_recebimentos()
+    Label(frame_recebimentos, text=f"Recebido (Mês Atual): R$ {recebido_mes:.2f}", **style_valor).pack()
+    Label(frame_recebimentos, text=f"Recebido (3 Meses): R$ {recebido_trimestre:.2f}", **style_valor).pack()
+
+    # Frame Lucro
+    frame_lucro = Frame(frame_dashboard, **style_frame)
+    frame_lucro.grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
+    
+    Label(frame_lucro, text="Lucro Líquido", **style_titulo).pack()
+    
+    lucro_mes, lucro_trimestre = obter_dados_lucro()
+    Label(frame_lucro, text=f"Lucro (Mês Atual): R$ {lucro_mes:.2f}", **style_valor).pack()
+    Label(frame_lucro, text=f"Lucro (3 Meses): R$ {lucro_trimestre:.2f}", **style_valor).pack()
+
+    # Configurar grid
+    frame_dashboard.grid_columnconfigure(0, weight=1)
+    frame_dashboard.grid_columnconfigure(1, weight=1)
+
+def obter_dados_clientes():
+
     conn = create_connection()
     cursor = conn.cursor()
-
-    # Calcular datas relevantes
-    hoje = datetime.now()
-    primeiro_dia_mes_atual = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    ultimo_dia_mes_anterior = primeiro_dia_mes_atual - timedelta(days=1)
-    primeiro_dia_mes_anterior = ultimo_dia_mes_anterior.replace(day=1)
-
-    # Total de vendas
-    cursor.execute("SELECT SUM(valor_total) FROM vendas")
-    vendas_total = cursor.fetchone()[0] or 0
-
-    # Vendas no mês atual
-    cursor.execute("SELECT SUM(valor_total) FROM vendas WHERE data_venda >= ?", (primeiro_dia_mes_atual,))
-    vendas_mes_atual = cursor.fetchone()[0] or 0
-
-    # Vendas no mês anterior
-    cursor.execute("SELECT SUM(valor_total) FROM vendas WHERE data_venda >= ? AND data_venda < ?", 
-                   (primeiro_dia_mes_anterior, primeiro_dia_mes_atual))
-    vendas_mes_anterior = cursor.fetchone()[0] or 0
-
-    # Total de clientes cadastrados
+    
+    # Total de clientes
     cursor.execute("SELECT COUNT(*) FROM clientes")
     total_clientes = cursor.fetchone()[0]
-
+    
+   
     conn.close()
+    return total_clientes
 
-    return vendas_total, vendas_mes_atual, vendas_mes_anterior, total_clientes
-
-def obter_total_vendas():
+def obter_dados_vendas():
+    """Retorna o total de vendas do mês atual e dos últimos 3 meses"""
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT SUM(valor_total) FROM vendas")
-    total = cursor.fetchone()[0]
+    
+    hoje = datetime.now()
+    primeiro_dia_mes = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    primeiro_dia_tres_meses = (hoje - timedelta(days=90)).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Vendas do mês atual
+    cursor.execute("""
+        SELECT COALESCE(SUM(valor_total), 0) FROM vendas 
+        WHERE data_venda >= ?
+    """, (primeiro_dia_mes,))
+    vendas_mes = cursor.fetchone()[0]
+    
+    # Vendas dos últimos 3 meses
+    cursor.execute("""
+        SELECT COALESCE(SUM(valor_total), 0) FROM vendas 
+        WHERE data_venda >= ?
+    """, (primeiro_dia_tres_meses,))
+    vendas_trimestre = cursor.fetchone()[0]
+    
     conn.close()
-    return total if total is not None else 0
+    return vendas_mes, vendas_trimestre
+
+def obter_dados_recebimentos():
+    """Retorna o total recebido no mês atual e nos últimos 3 meses"""
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    hoje = datetime.now()
+    primeiro_dia_mes = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    primeiro_dia_tres_meses = (hoje - timedelta(days=90)).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Recebimentos do mês atual
+    cursor.execute("""
+        SELECT COALESCE(SUM(valor_pago), 0) FROM pagamentos 
+        WHERE data_pagamento >= ?
+    """, (primeiro_dia_mes,))
+    recebido_mes = cursor.fetchone()[0]
+    
+    # Recebimentos dos últimos 3 meses
+    cursor.execute("""
+        SELECT COALESCE(SUM(valor_pago), 0) FROM pagamentos 
+        WHERE data_pagamento >= ?
+    """, (primeiro_dia_tres_meses,))
+    recebido_trimestre = cursor.fetchone()[0]
+    
+    conn.close()
+    return recebido_mes, recebido_trimestre
+
+def obter_dados_lucro():
+    """Retorna o lucro líquido do mês atual e dos últimos 3 meses"""
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    hoje = datetime.now()
+    primeiro_dia_mes = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    primeiro_dia_tres_meses = (hoje - timedelta(days=90)).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Query para calcular o lucro líquido
+    query_lucro = """
+        SELECT COALESCE(SUM((iv.valor_unitario - p.preco_custo) * iv.quantidade), 0) as lucro_liquido
+        FROM vendas v
+        JOIN itens_venda iv ON v.id = iv.venda_id
+        JOIN produtos p ON iv.produto_id = p.id
+        WHERE v.data_venda >= ?
+    """
+    
+    # Lucro do mês atual
+    cursor.execute(query_lucro, (primeiro_dia_mes,))
+    lucro_mes = cursor.fetchone()[0]
+    
+    # Lucro dos últimos 3 meses
+    cursor.execute(query_lucro, (primeiro_dia_tres_meses,))
+    lucro_trimestre = cursor.fetchone()[0]
+    
+    # Debug: imprimir detalhes do cálculo
+    cursor.execute("""
+        SELECT 
+            v.id as venda_id,
+            v.data_venda,
+            p.id as produto_id,
+            p.tipo,
+            iv.quantidade,
+            p.preco_custo,
+            iv.valor_unitario,
+            (iv.valor_unitario - p.preco_custo) * iv.quantidade as lucro_item
+        FROM vendas v
+        JOIN itens_venda iv ON v.id = iv.venda_id
+        JOIN produtos p ON iv.produto_id = p.id
+        WHERE v.data_venda >= ?
+        ORDER BY v.data_venda DESC
+    """, (primeiro_dia_mes,))
+    
+
+    conn.close()
+    return lucro_mes, lucro_trimestre
 
 def abrir_contas_receber():
     # Limpar canvas e configurar background
@@ -1132,6 +1272,31 @@ def editar_item_venda(event=None):
 
     Button(janela_edicao, text="Salvar", command=salvar_edicao,
            bg="#4CAF50", fg="white").pack(pady=10)
+
+def adicionar_coluna_data_cadastro():
+    """Adiciona a coluna data_cadastro na tabela clientes se ela não existir"""
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Verificar se a coluna existe
+        cursor.execute("PRAGMA table_info(clientes)")
+        colunas = [info[1] for info in cursor.fetchall()]
+        
+        if 'data_cadastro' not in colunas:
+            cursor.execute("""
+                ALTER TABLE clientes
+                ADD COLUMN data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            """)
+            conn.commit()
+            print("Coluna data_cadastro adicionada com sucesso!")
+    except sqlite3.Error as e:
+        print(f"Erro ao adicionar coluna: {e}")
+    finally:
+        conn.close()
+
+# Chamar esta função ao iniciar o programa
+adicionar_coluna_data_cadastro()
 
 window = Tk()
 window.geometry("1200x740")
