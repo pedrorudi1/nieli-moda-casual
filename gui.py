@@ -1,4 +1,4 @@
-# import pyi_splash
+import pyi_splash
 import sqlite3
 from datetime import datetime, date, timedelta
 import pytz
@@ -1520,9 +1520,7 @@ def registrar_pagamento(tree, entry_valor):
         carregar_contas(tree)
         atualizar_total_receber()
         
-        # Se estiver usando a tree_historico, atualizar também
-        if 'tree_historico' in globals():
-            carregar_historico_pagamentos(tree_historico)
+
             
     except sqlite3.Error as e:
         conn.rollback()
@@ -1912,5 +1910,5 @@ BtnDashboard = Button(window, text='Dashboard', image=FotoRelatorios, command=ab
 BtnDashboard.place(x=52.0, y=580.0)
 
 window.resizable(False, False)
-# pyi_splash.close()
+pyi_splash.close()
 window.mainloop()
