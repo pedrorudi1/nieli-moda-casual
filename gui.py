@@ -1,10 +1,9 @@
-import pyi_splash
 import sqlite3
 from datetime import datetime, date, timedelta
 import pytz
 from tkinter import Tk, Canvas, Entry, Button, PhotoImage, ttk, messagebox, Toplevel, Label, Frame, StringVar, END, LEFT, RIGHT, BOTH
 
-# Definir o fuso horário de São Paulo
+
 FUSO_HORARIO = pytz.timezone('America/Sao_Paulo')
 
 # Definir adaptadores personalizados para datetime e date
@@ -70,7 +69,8 @@ def create_connection():
                          detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
 
 
-global combo_clientes, combo_produtos, entry_quantidade, entry_valor, label_estoque, tree_vendas, tree_itens_venda, label_total, tree_produtos, tree_clientes
+global combo_clientes, combo_produtos, entry_quantidade, entry_valor, label_estoque
+global tree_vendas, tree_itens_venda, label_total, tree_produtos, tree_clientes
 itens_venda = []
 
 def criar_banco_dados():
@@ -164,9 +164,8 @@ def cadastrar_cliente():
         messagebox.showerror("Erro", "Por favor, preencha o nome do cliente.")
         return
     
-    # Se o telefone estiver vazio, usar None
     if not telefone:
-        telefone = None
+        telefone = "-"
     
     conn = create_connection()
     cursor = conn.cursor()
@@ -490,7 +489,6 @@ def consultar_vendas():
     return vendas
 
 def atualizar_tabela_vendas():
-    """Atualiza a tabela de histórico de vendas"""
     global tree_vendas
     # Limpar a tabela
     for i in tree_vendas.get_children():
@@ -1854,7 +1852,6 @@ def adicionar_colunas_promocao():
     cursor = conn.cursor()
     
     try:
-        # Verificar se as colunas existem
         cursor.execute("PRAGMA table_info(produtos)")
         colunas = [info[1] for info in cursor.fetchall()]
         
@@ -1876,7 +1873,6 @@ def adicionar_colunas_promocao():
     finally:
         conn.close()
 
-# Chamar no início do programa
 adicionar_colunas_promocao()
 
 window = Tk()
@@ -1890,7 +1886,6 @@ FotoVendas = PhotoImage(file=r"assets/Vendas.png")
 FotoRelatorios = PhotoImage(file=r"assets/Relatorios.png")
 FotoContasAReceber = PhotoImage(file=r"assets/ContasAReceber.png")
 FotoPromocoes = PhotoImage(file=r"assets/Promocoes.png")
-
 
 canvas = Canvas(window, width=1200, height=740)
 canvas.pack(fill="both", expand=True)
@@ -1910,5 +1905,11 @@ BtnDashboard = Button(window, text='Dashboard', image=FotoRelatorios, command=ab
 BtnDashboard.place(x=52.0, y=580.0)
 
 window.resizable(False, False)
-pyi_splash.close()
+
+try:
+    import pyi_splash
+    pyi_splash.close()
+except ImportError:
+    pass
+
 window.mainloop()
