@@ -495,6 +495,29 @@ def consultar_vendas():
     conn.close()
     return vendas
 
+def excluir_venda(event=None):
+    selected_item = tree_vendas.selection()
+    if not selected_item:
+        messagebox.showwarning("Aviso", "Por favor, selecione uma venda para excluir.")
+        return
+
+    resposta = messagebox.askyesno("Confirmar exclusão", "Tem certeza que deseja excluir esta venda?")
+    if resposta:
+        venda_id = tree_vendas.item(selected_item)['values'][0]
+
+        conn = create_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM vendas WHERE id = ?", (venda_id,))
+            conn.commit()
+            tree_vendas.delete(selected_item)
+            messagebox.showinfo("Sucesso", "Venda excluída com sucesso.")
+        except sqlite3.Error as e:
+            conn.rollback()
+            messagebox.showerror("Erro", f"Ocorreu um erro ao excluir o produto: {str(e)}")
+        finally:
+            conn.close()
+
 def atualizar_tabela_vendas():
     global tree_vendas
     # Limpar a tabela
@@ -738,6 +761,7 @@ def limpar_venda():
     # Atualizar total
     atualizar_label_total()
 
+
 def limpar_tela():
     for widget in canvas.winfo_children():
         widget.destroy()
@@ -848,9 +872,11 @@ def abrir_cadastro_vendas():
     # Adicionar eventos
     tree_itens_venda.bind("<Delete>", remover_item_venda)
     tree_itens_venda.bind("<Double-1>", editar_item_venda)
+    tree_vendas.bind("<Delete>", excluir_venda)
 
     # Carregar vendas existentes
     atualizar_tabela_vendas()
+
 
 def abrir_dashboard():
     """Abre a tela de dashboard com indicadores de desempenho"""
@@ -1025,7 +1051,6 @@ def obter_dados_lucro():
     return lucro_mes, lucro_trimestre
 
 def abrir_contas_receber():
-    # Limpar canvas e configurar background
     canvas.delete("all")
     canvas.create_image(0, 0, image=FotoBG, anchor="nw")
     canvas.create_text(700, 30, text="Contas a Receber", font=("Arial", 24))
@@ -1182,8 +1207,6 @@ def abrir_contas_receber():
                           fg="white")
     btn_registrar.grid(row=0, column=2, padx=20, pady=5)
 
-    # NOVA SEÇÃO: Histórico de Pagamentos
-    # Frame para filtros do histórico
     frame_filtros_historico = Frame(tab_historico)
     frame_filtros_historico.pack(pady=10)
 
@@ -1920,3 +1943,6 @@ except ImportError:
     pass
 
 window.mainloop()
+
+#TODO - Criar a bag de produtos
+#TODO - Autocomplete no nome dos clientes e produtos no cadastro de vendas
