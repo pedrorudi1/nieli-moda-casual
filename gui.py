@@ -70,7 +70,7 @@ def create_connection():
 
 
 global combo_clientes, combo_produtos, entry_quantidade, entry_valor, label_estoque
-global tree_vendas, tree_itens_venda, label_total, tree_produtos, tree_clientes
+global tree_vendas, tree_itens_venda, label_total, tree_produtos, tree_clientes, entry_preco_venda
 itens_venda = []
 
 def criar_banco_dados():
@@ -274,7 +274,7 @@ def cadastrar_produto():
     cor = entry_cor.get()
     tamanho = entry_tamanho.get()
     preco_custo = float(entry_preco_custo.get())
-    preco_venda = preco_custo * 2  # Calculando o preço de venda como três vezes o preço de custo
+    preco_venda = float(entry_preco_venda.get())
     quantidade = int(entry_quantidade.get())
 
     conn = create_connection()
@@ -290,6 +290,7 @@ def cadastrar_produto():
     entry_cor.delete(0, END)
     entry_tamanho.delete(0, END)
     entry_preco_custo.delete(0, END)
+    entry_preco_venda.delete(0, END)
     entry_quantidade.delete(0, END)
 
     # Inserir novo produto na tabela
@@ -324,7 +325,7 @@ def excluir_produto(event=None):
             conn.close()
 
 def preencher_campos_produto(event):
-    global entry_tipo, entry_cor, entry_tamanho, entry_preco_custo, entry_quantidade, tree_produtos
+    global entry_tipo, entry_cor, entry_tamanho, entry_preco_custo, entry_quantidade, tree_produtos, entry_preco_venda
     
     item_selecionado = tree_produtos.selection()[0]
     valores = tree_produtos.item(item_selecionado, 'values')
@@ -334,6 +335,7 @@ def preencher_campos_produto(event):
     entry_cor.delete(0, END)
     entry_tamanho.delete(0, END)
     entry_preco_custo.delete(0, END)
+    entry_preco_venda.delete(0, END)
     entry_quantidade.delete(0, END)
     
     # Preencher campos com os dados do produto selecionado
@@ -341,10 +343,11 @@ def preencher_campos_produto(event):
     entry_cor.insert(0, valores[2])
     entry_tamanho.insert(0, valores[3])
     entry_preco_custo.insert(0, valores[4])
+    entry_preco_venda.insert(0, valores[5])
     entry_quantidade.insert(0, valores[6])
 
 def abrir_cadastro_produtos():
-    global entry_tipo, entry_cor, entry_tamanho, entry_preco_custo, entry_quantidade, tree_produtos
+    global entry_tipo, entry_cor, entry_tamanho, entry_preco_custo, entry_quantidade, tree_produtos, entry_preco_venda
 
     # Limpar canvas existente
     canvas.delete("all")
@@ -369,21 +372,25 @@ def abrir_cadastro_produtos():
     entry_preco_custo = Entry(window, width=40, font=("Arial", 12))
     canvas.create_window(560, 240, window=entry_preco_custo, anchor="w")
 
-    canvas.create_text(550, 280, text="Quantidade:", anchor="e", font=("Arial", 12))
+    canvas.create_text(550, 280, text="Preço de Venda: ", anchor="e", font=("Arial, 12"))
+    entry_preco_venda = Entry(window, width=40, font=("Arial", 12))
+    canvas.create_window(560,280, window=entry_preco_venda, anchor="w")
+
+    canvas.create_text(550, 320, text="Quantidade:", anchor="e", font=("Arial", 12))
     entry_quantidade = Entry(window, width=40, font=("Arial", 12))
-    canvas.create_window(560, 280, window=entry_quantidade, anchor="w")
+    canvas.create_window(560, 320, window=entry_quantidade, anchor="w")
 
     btn_cadastrar = Button(window, text="Cadastrar", command=cadastrar_produto, 
                           font=("Arial", 12), bg="#4CAF50", fg="white")
-    canvas.create_window(650, 330, window=btn_cadastrar)
+    canvas.create_window(650, 360, window=btn_cadastrar)
 
     btn_atualizar = Button(window, text="Atualizar", command=atualizar_produto, 
                           font=("Arial", 12), bg="#2196F3", fg="white")
-    canvas.create_window(750, 330, window=btn_atualizar)
+    canvas.create_window(750, 360, window=btn_atualizar)
 
     btn_excluir = Button(window, text="Excluir", command=excluir_produto, 
                         font=("Arial", 12), bg="#f44336", fg="white")
-    canvas.create_window(850, 330, window=btn_excluir)
+    canvas.create_window(850, 360, window=btn_excluir)
 
     # Adicionar tabela de produtos
     tree_produtos = ttk.Treeview(window, columns=("ID", "Tipo", "Cor", "Tamanho", "Preço Custo", "Preço Venda", "Quantidade"), show="headings")
@@ -394,7 +401,7 @@ def abrir_cadastro_produtos():
     tree_produtos.heading("Preço Custo", text="Preço Custo")
     tree_produtos.heading("Preço Venda", text="Preço Venda")
     tree_produtos.heading("Quantidade", text="Quantidade")
-    canvas.create_window(700, 500, window=tree_produtos, width=800, height=300)
+    canvas.create_window(700, 540, window=tree_produtos, width=800, height=300)
 
     # Adicionar evento de clique duplo
     tree_produtos.bind("<Double-1>", preencher_campos_produto)
